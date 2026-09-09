@@ -1,0 +1,4 @@
+#!name=Aurora Local
+#!desc=Local developer connection only
+[Rule]
+IP-CIDR,10.7.0.1/32,AuroraLocal,no-resolve

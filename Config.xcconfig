@@ -1,0 +1,2 @@
+// Personal signing selection stays outside Git.
+#include? "Signing.xcconfig"

@@ -1,0 +1,678 @@
+diff --git a/ffi/Cargo.toml b/ffi/Cargo.toml
+index c3270f8..b6efbdf 100644
+--- a/ffi/Cargo.toml
++++ b/ffi/Cargo.toml
+@@ -65,7 +65,7 @@ obfuscate = ["idevice/obfuscate"]
+ restore = ["idevice/restore", "dep:futures"]
+ restore_recovery = ["restore", "idevice/restore_recovery"]
+ restore_service = ["idevice/restore_service", "rsd"]
+-remote_pairing = ["idevice/remote_pairing", "dep:mdns-sd"]
++remote_pairing = ["idevice/remote_pairing"]
+ rsd = ["idevice/rsd"]
+ syslog_relay = ["idevice/syslog_relay"]
+ tcp = ["idevice/tcp"]
+diff --git a/ffi/src/dvt/location_simulation.rs b/ffi/src/dvt/location_simulation.rs
+index 5f8579e..baa006d 100644
+--- a/ffi/src/dvt/location_simulation.rs
++++ b/ffi/src/dvt/location_simulation.rs
+@@ -4,7 +4,9 @@ use std::ptr::null_mut;
+ 
+ use idevice::{ReadWrite, dvt::location_simulation::LocationSimulationClient};
+ 
+-use crate::{IdeviceFfiError, dvt::remote_server::RemoteServerHandle, ffi_err, run_sync};
++use crate::{
++    IdeviceFfiError, dvt::remote_server::RemoteServerHandle, ffi_err, run_global_timeout, run_sync,
++};
+ 
+ /// Opaque handle to a ProcessControlClient
+ pub struct LocationSimulationHandle<'a>(pub LocationSimulationClient<'a, Box<dyn ReadWrite>>);
+@@ -31,7 +33,8 @@ pub unsafe extern "C" fn location_simulation_new(
+     }
+ 
+     let server = unsafe { &mut (*server).0 };
+-    let res = run_sync(async move { LocationSimulationClient::new(server).await });
++    let res =
++        run_sync(async move { run_global_timeout(|| LocationSimulationClient::new(server)).await });
+ 
+     match res {
+         Ok(client) => {
+@@ -76,7 +79,7 @@ pub unsafe extern "C" fn location_simulation_clear(
+     }
+ 
+     let client = unsafe { &mut (*handle).0 };
+-    let res = run_sync(async move { client.clear().await });
++    let res = run_sync(async move { run_global_timeout(|| client.clear()).await });
+ 
+     match res {
+         Ok(_) => null_mut(),
+@@ -107,7 +110,7 @@ pub unsafe extern "C" fn location_simulation_set(
+     }
+ 
+     let client = unsafe { &mut (*handle).0 };
+-    let res = run_sync(async move { client.set(latitude, longitude).await });
++    let res = run_sync(async move { run_global_timeout(|| client.set(latitude, longitude)).await });
+ 
+     match res {
+         Ok(_) => null_mut(),
+diff --git a/ffi/src/dvt/remote_server.rs b/ffi/src/dvt/remote_server.rs
+index 0d7da3b..28568ee 100644
+--- a/ffi/src/dvt/remote_server.rs
++++ b/ffi/src/dvt/remote_server.rs
+@@ -2,7 +2,9 @@
+ 
+ use std::ptr::null_mut;
+ 
+-use crate::{IdeviceFfiError, ReadWriteOpaque, ffi_err, run_sync, run_sync_local};
++use crate::{
++    IdeviceFfiError, ReadWriteOpaque, ffi_err, run_global_timeout, run_sync, run_sync_local,
++};
+ #[cfg(all(feature = "core_device_proxy", feature = "rsd"))]
+ use crate::{core_device_proxy::AdapterHandle, rsd::RsdHandshakeHandle};
+ #[cfg(all(feature = "core_device_proxy", feature = "rsd"))]
+@@ -81,15 +83,18 @@ pub unsafe extern "C" fn remote_server_connect_rsd(
+     }
+     let res: Result<RemoteServerClient<Box<dyn ReadWrite>>, IdeviceError> =
+         run_sync_local(async move {
+-            let provider_ref = unsafe { &mut (*provider).0 };
+-            let handshake_ref = unsafe { &mut (*handshake).0 };
++            run_global_timeout(|| async move {
++                let provider_ref = unsafe { &mut (*provider).0 };
++                let handshake_ref = unsafe { &mut (*handshake).0 };
+ 
+-            // Connect using the reference
+-            let mut rs_client =
+-                RemoteServerClient::connect_rsd(provider_ref, handshake_ref).await?;
+-            // TODO: remove this when we can read from the remote server, or rethink the Rust API
+-            rs_client.read_message(0).await?;
+-            Ok(rs_client)
++                // Connect using the reference
++                let mut rs_client =
++                    RemoteServerClient::connect_rsd(provider_ref, handshake_ref).await?;
++                // TODO: remove this when we can read from the remote server, or rethink the Rust API
++                rs_client.read_message(0).await?;
++                Ok::<_, IdeviceError>(rs_client)
++            })
++            .await
+         });
+ 
+     match res {
+diff --git a/ffi/src/pairable_host.rs b/ffi/src/pairable_host.rs
+index e1286d5..89dcc7a 100644
+--- a/ffi/src/pairable_host.rs
++++ b/ffi/src/pairable_host.rs
+@@ -1,292 +1,257 @@
+-//! FFI for device-initiated remote pairing (the "pairable host" / responder side).
+-//!
+-//! Starting with iOS 27 a device can initiate pairing to a computer instead of the
+-//! computer initiating pairing to the device. The computer advertises an
+-//! `_remotepairing-pairable-host._tcp` mDNS service; the device connects to the
+-//! advertised port and drives the rppairing conversation while this side acts as
+-//! the SRP server/accessory. We generate a setup PIN and hand it to the caller via
+-//! a callback; the user types it into the device.
+-//!
+-//! This mirrors the host-initiated FFI in [`crate::tunnel_provider`] and the
+-//! `pair_host` tool in `tools/src/pair_host.rs`.
++//! Aurora's on-device responder for device-initiated remote pairing.
+ 
+ use std::ffi::{CStr, CString, c_char, c_void};
+ use std::net::Ipv4Addr;
+ use std::ptr::null_mut;
+-use std::sync::Arc;
++use std::sync::atomic::{AtomicBool, Ordering};
+ use std::time::Duration;
+ 
+ use idevice::IdeviceError;
+-use idevice::remote_pairing::{
+-    PAIRABLE_HOST_SERVICE_TYPE, PairableHost, PairableHostInfo, RpPairingFile, RpPairingSocket,
+-};
+-use mdns_sd::{ServiceDaemon, ServiceInfo};
+-use tokio::sync::Semaphore;
++use idevice::remote_pairing::{PairableHost, PairableHostInfo, RpPairingFile, RpPairingSocket};
+ 
+-use crate::rp_pairing_file::{RpPairingFileHandle, RpPairingPeerDeviceC, peer_device_to_c};
++use crate::rp_pairing_file::RpPairingFileHandle;
+ use crate::{IdeviceFfiError, ffi_err, run_sync_local};
+ 
+-/// Wrapper so the raw PIN-callback context pointer can cross the async boundary.
+-struct PinCtx(*mut c_void);
+-unsafe impl Send for PinCtx {}
+-unsafe impl Sync for PinCtx {}
++const PAIRING_TIMEOUT: Duration = Duration::from_secs(180);
++static PAIRING_CANCELLED: AtomicBool = AtomicBool::new(false);
++static PAIRING_ACTIVE: AtomicBool = AtomicBool::new(false);
+ 
+-/// Cancellation state shared between the blocking `pairable_host_accept` call and
+-/// whichever thread signals it.
+-///
+-/// A zero-permit semaphore is the whole mechanism: `acquire` never completes on its
+-/// own, and `close` wakes every waiter. Because acquiring a *closed* semaphore fails
+-/// immediately, a cancel signalled before the wait even starts is not lost.
+-struct CancelState {
+-    sem: Semaphore,
+-}
+-
+-impl CancelState {
+-    fn new() -> Self {
+-        Self {
+-            sem: Semaphore::new(0),
+-        }
+-    }
+-
+-    fn signal(&self) {
+-        self.sem.close();
+-    }
++#[derive(Clone, Copy)]
++struct CallbackContext(*mut c_void);
++unsafe impl Send for CallbackContext {}
++unsafe impl Sync for CallbackContext {}
+ 
+-    fn is_canceled(&self) -> bool {
+-        self.sem.is_closed()
+-    }
++struct PairingGuard;
+ 
+-    /// Resolves once (and only once) the token has been signalled.
+-    async fn canceled(&self) {
+-        let _ = self.sem.acquire().await;
++impl Drop for PairingGuard {
++    fn drop(&mut self) {
++        PAIRING_ACTIVE.store(false, Ordering::Release);
+     }
+ }
+ 
+-/// Opaque cancellation token for [`pairable_host_accept`].
+-///
+-/// Create one with `pairable_host_cancel_new`, hand it to `pairable_host_accept`,
+-/// and call `pairable_host_cancel_signal` from any other thread to abort the wait.
+-/// Free it with `pairable_host_cancel_free` once the accept has returned.
+-pub struct PairableHostCancel(Arc<CancelState>);
+-
+-/// Creates a cancellation token for `pairable_host_accept`.
++/// Sets the process-wide cancellation flag observed by the active pairing call.
+ ///
+-/// Returns NULL only if allocation fails. Free with `pairable_host_cancel_free`.
++/// Call with `false` immediately before starting, and `true` to cancel. The accept
++/// function intentionally does not reset this flag so a cancellation cannot be lost.
+ #[unsafe(no_mangle)]
+-pub extern "C" fn pairable_host_cancel_new() -> *mut PairableHostCancel {
+-    Box::into_raw(Box::new(PairableHostCancel(Arc::new(CancelState::new()))))
++pub extern "C" fn aurora_pairable_host_set_cancelled(cancelled: bool) {
++    PAIRING_CANCELLED.store(cancelled, Ordering::Release);
+ }
+ 
+-/// Signals a cancellation token, unblocking the `pairable_host_accept` it was passed
+-/// to. That call returns the `CanceledByUser` error.
+-///
+-/// Safe to call from any thread, before or during the accept, and safe to call more
+-/// than once. Cancelling a token that was never passed to an accept, or one whose
+-/// accept already returned, does nothing.
+-///
+-/// # Safety
+-/// `cancel` must be a pointer returned by `pairable_host_cancel_new` that has not yet
+-/// been freed.
+-#[unsafe(no_mangle)]
+-pub unsafe extern "C" fn pairable_host_cancel_signal(cancel: *const PairableHostCancel) {
+-    if cancel.is_null() {
+-        return;
++async fn wait_for_cancellation() {
++    loop {
++        if PAIRING_CANCELLED.load(Ordering::Acquire) {
++            return;
++        }
++        tokio::time::sleep(Duration::from_millis(100)).await;
+     }
+-    unsafe { &*cancel }.0.signal();
+ }
+ 
+-/// Frees a cancellation token.
+-///
+-/// The in-flight accept holds its own reference to the shared state, so freeing the
+-/// token while an accept is still running is safe — it just means nothing can cancel
+-/// that accept any more.
+-///
+-/// # Safety
+-/// `cancel` must be a pointer returned by `pairable_host_cancel_new` or NULL, and must
+-/// not be used afterwards.
+-#[unsafe(no_mangle)]
+-pub unsafe extern "C" fn pairable_host_cancel_free(cancel: *mut PairableHostCancel) {
+-    if cancel.is_null() {
+-        return;
+-    }
+-    let _ = unsafe { Box::from_raw(cancel) };
++fn txt_value(records: &[(String, String)], key: &str) -> Result<CString, IdeviceError> {
++    let value = records
++        .iter()
++        .find_map(|(record_key, value)| (record_key == key).then_some(value.as_str()))
++        .ok_or_else(|| IdeviceError::InternalError(format!("missing {key} TXT record")))?;
++    CString::new(value).map_err(|_| IdeviceError::FfiInvalidString)
+ }
+ 
+-/// Advertises this computer as a pairable host and accepts a single device-initiated
+-/// pairing.
+-///
+-/// This blocks the calling thread until a device discovers the advertised
+-/// `_remotepairing-pairable-host._tcp` service, connects, and the pairing either
+-/// completes or fails — or until `cancel` is signalled from another thread. While the
+-/// pairing is in progress `pin_callback` is invoked once with the 6-digit setup code
+-/// that the user must type into the device.
++/// Accepts one device-initiated remote pairing through a loopback TCP listener.
+ ///
+-/// On success a freshly generated [`RpPairingFileHandle`] is written to
+-/// `out_pairing_file`; it carries this host's long-term keys plus the paired
+-/// device's `altIRK`. Persist it (and `out_host_alt_irk`, see below) so the device
+-/// keeps recognizing this host on future connections.
++/// The listening callback receives the data that Swift must publish using
++/// Network.framework. The public `NWListener` then relays its accepted connection
++/// to the returned loopback port. All callback strings are valid only for the
++/// duration of that callback and must be copied by the caller.
+ ///
+-/// # Arguments
+-/// * `name` - human-readable name shown on the device (e.g. "Jackson's MacBook Pro").
+-/// * `model` - hardware model identifier shown on the device. `NULL` defaults to
+-///   `"Mac17,7"`. iOS treats the host as a computer, so keep this a Mac identifier.
+-/// * `port` - TCP port to listen on. `0` picks a free port.
+-/// * `pin_callback` - invoked with the setup PIN to display. May be `NULL`.
+-/// * `pin_context` - opaque pointer passed back to `pin_callback`.
+-/// * `cancel` - optional cancellation token from `pairable_host_cancel_new`. Signal it
+-///   from another thread to abort the wait (e.g. the user dismissed the pairing UI).
+-///   `NULL` means the call can only be ended by a device connecting. Without one there
+-///   is no way to stop advertising short of exiting the process.
+-/// * `out_host_alt_irk` - optional. If non-NULL, must point to a 16-byte buffer that
+-///   receives the host's generated `altIRK` (needed to re-advertise this host so an
+-///   already-paired device recognizes it). May be `NULL`.
+-/// * `out_peer_device` - optional. If non-NULL, receives the paired device's identity
+-///   (name, model, UDID, `altIRK`), which the caller must free with
+-///   `rppairing_peer_device_free`. May be `NULL`.
+-/// * `out_pairing_file` - receives the resulting pairing file on success.
++/// The whole operation, including TCP accept and SRP, is limited to 180 seconds.
+ ///
+ /// # Safety
+-/// `name` must be a valid null-terminated C string. `model` must be NULL or a valid
+-/// null-terminated C string. `cancel` must be NULL or a live token from
+-/// `pairable_host_cancel_new`. `out_host_alt_irk` must be NULL or point to at least 16
+-/// writable bytes. `out_peer_device` must be NULL or a valid writable pointer.
+-/// `out_pairing_file` must be valid and non-null.
++/// `name` and non-null `model` must point to valid null-terminated UTF-8 strings.
++/// `out_pairing_file` must be writable and non-null. Callback context pointers must
++/// remain valid until this function returns.
+ #[unsafe(no_mangle)]
+ #[allow(clippy::too_many_arguments)]
+-pub unsafe extern "C" fn pairable_host_accept(
++pub unsafe extern "C" fn aurora_pairable_host_accept(
+     name: *const c_char,
+     model: *const c_char,
+-    port: u16,
+     pin_callback: Option<extern "C" fn(pin: *const c_char, context: *mut c_void)>,
+     pin_context: *mut c_void,
+-    cancel: *const PairableHostCancel,
+-    out_host_alt_irk: *mut u8,
+-    out_peer_device: *mut *mut RpPairingPeerDeviceC,
++    listening_callback: Option<
++        extern "C" fn(
++            port: u16,
++            service_identifier: *const c_char,
++            name: *const c_char,
++            model: *const c_char,
++            auth_tag: *const c_char,
++            ver: *const c_char,
++            min_ver: *const c_char,
++            context: *mut c_void,
++        ),
++    >,
++    listening_context: *mut c_void,
++    connected_callback: Option<extern "C" fn(context: *mut c_void)>,
++    connected_context: *mut c_void,
+     out_pairing_file: *mut *mut RpPairingFileHandle,
+ ) -> *mut IdeviceFfiError {
+     if name.is_null() || out_pairing_file.is_null() {
+         return ffi_err!(IdeviceError::FfiInvalidArg);
+     }
++    unsafe { *out_pairing_file = null_mut() };
++
++    // ponytail: one process-wide slot matches the app's single pairing UI. Replace
++    // this with per-session handles only if concurrent pairing becomes a requirement.
++    if PAIRING_ACTIVE
++        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
++        .is_err()
++    {
++        return ffi_err!(IdeviceError::InternalError(
++            "a pairable-host operation is already active".into()
++        ));
++    }
++    let _guard = PairingGuard;
++
++    if PAIRING_CANCELLED.load(Ordering::Acquire) {
++        return ffi_err!(IdeviceError::CanceledByUser);
++    }
+ 
+     let name = match unsafe { CStr::from_ptr(name) }.to_str() {
+-        Ok(s) => s.to_string(),
++        Ok(value) => value.to_owned(),
+         Err(_) => return ffi_err!(IdeviceError::FfiInvalidString),
+     };
+     let model = if model.is_null() {
+-        "Mac17,7".to_string()
++        "Mac17,7".to_owned()
+     } else {
+         match unsafe { CStr::from_ptr(model) }.to_str() {
+-            Ok(s) => s.to_string(),
++            Ok(value) => value.to_owned(),
+             Err(_) => return ffi_err!(IdeviceError::FfiInvalidString),
+         }
+     };
+ 
+-    let cancel = if cancel.is_null() {
+-        None
+-    } else {
+-        Some(unsafe { &*cancel }.0.clone())
+-    };
++    let pin_context = CallbackContext(pin_context);
++    let listening_context = CallbackContext(listening_context);
++    let connected_context = CallbackContext(connected_context);
+ 
+-    let ctx = PinCtx(pin_context);
+-
+-    let res = run_sync_local(async move {
+-        if cancel.as_ref().is_some_and(|c| c.is_canceled()) {
+-            return Err(IdeviceError::CanceledByUser);
+-        }
+-
+-        // Bind first so we can advertise the real port.
+-        let listener = tokio::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
+-            .await
+-            .map_err(|e| IdeviceError::InternalError(format!("bind: {e}")))?;
+-        let port = listener
+-            .local_addr()
+-            .map_err(|e| IdeviceError::InternalError(format!("{e}")))?
+-            .port();
++    let result = run_sync_local(async move {
++        let operation = async move {
++            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
++                .await
++                .map_err(|error| IdeviceError::InternalError(format!("loopback bind: {error}")))?;
++            let port = listener
++                .local_addr()
++                .map_err(|error| IdeviceError::InternalError(format!("listener address: {error}")))?
++                .port();
+ 
+-        let mut pairing_file = RpPairingFile::generate(&name);
+-        let host_info = PairableHostInfo::generate(&name, &model);
+-        let host_alt_irk = host_info.alt_irk;
+-        let service_identifier = pairing_file.identifier.clone();
++            let mut pairing_file = RpPairingFile::generate(&name);
++            let host_info = PairableHostInfo::generate(&name, &model);
++            let service_identifier = pairing_file.identifier.clone();
++            let txt_records = host_info.mdns_txt_records(&service_identifier);
+ 
+-        // Advertise the pairable-host mDNS service so the device can find us.
+-        let mdns = ServiceDaemon::new()
+-            .map_err(|e| IdeviceError::InternalError(format!("mDNS daemon: {e}")))?;
+-        // Apple's instance names exceed the default cap.
+-        let _ = mdns.set_service_name_len_max(30);
+-        let hostname = format!("idevice-{}.local.", &service_identifier[..8]);
+-        let txt = host_info.mdns_txt_records(&service_identifier);
+-        let properties: Vec<(&str, &str)> =
+-            txt.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+-        let service_info = ServiceInfo::new(
+-            PAIRABLE_HOST_SERVICE_TYPE,
+-            &service_identifier,
+-            &hostname,
+-            "",
+-            port,
+-            &properties[..],
+-        )
+-        .map_err(|e| IdeviceError::InternalError(format!("mDNS service info: {e}")))?
+-        .enable_addr_auto();
+-        mdns.register(service_info)
+-            .map_err(|e| IdeviceError::InternalError(format!("mDNS register: {e}")))?;
++            if let Some(callback) = listening_callback {
++                let service_identifier = CString::new(service_identifier.as_str())
++                    .map_err(|_| IdeviceError::FfiInvalidString)?;
++                let callback_name =
++                    CString::new(name.as_str()).map_err(|_| IdeviceError::FfiInvalidString)?;
++                let callback_model =
++                    CString::new(model.as_str()).map_err(|_| IdeviceError::FfiInvalidString)?;
++                let auth_tag = txt_value(&txt_records, "authTag")?;
++                let ver = txt_value(&txt_records, "ver")?;
++                let min_ver = txt_value(&txt_records, "minVer")?;
++                callback(
++                    port,
++                    service_identifier.as_ptr(),
++                    callback_name.as_ptr(),
++                    callback_model.as_ptr(),
++                    auth_tag.as_ptr(),
++                    ver.as_ptr(),
++                    min_ver.as_ptr(),
++                    listening_context.0,
++                );
++            }
+ 
+-        let pair = async {
+-            // Wait for a device to connect and start pairing.
+-            let (stream, _peer) = listener
++            let (stream, _) = listener
+                 .accept()
+                 .await
+-                .map_err(|e| IdeviceError::InternalError(format!("accept: {e}")))?;
++                .map_err(|error| IdeviceError::InternalError(format!("accept: {error}")))?;
++            if let Some(callback) = connected_callback {
++                callback(connected_context.0);
++            }
+ 
+             let socket = RpPairingSocket::new_device(stream);
+             let mut host = PairableHost::new(socket, host_info);
++            host.accept(&mut pairing_file, |pin| async move {
++                if let Some(callback) = pin_callback
++                    && let Ok(pin) = CString::new(pin)
++                {
++                    callback(pin.as_ptr(), pin_context.0);
++                }
++            })
++            .await?;
+ 
+-            let peer_device = host
+-                .accept(&mut pairing_file, |pin| async move {
+-                    if let Some(cb) = pin_callback
+-                        && let Ok(cpin) = CString::new(pin)
+-                    {
+-                        cb(cpin.as_ptr(), ctx.0);
+-                    }
+-                })
+-                .await?;
+-
+-            Ok::<_, IdeviceError>(peer_device)
++            Ok::<RpPairingFile, IdeviceError>(pairing_file)
+         };
+ 
+-        let result = match cancel {
+-            Some(c) => {
+-                tokio::select! {
+-                    biased;
+-                    _ = c.canceled() => Err(IdeviceError::CanceledByUser),
+-                    r = pair => r,
+-                }
++        tokio::time::timeout(PAIRING_TIMEOUT, async {
++            tokio::select! {
++                result = operation => result,
++                _ = wait_for_cancellation() => Err(IdeviceError::CanceledByUser),
+             }
+-            None => pair.await,
+-        };
+-
+-        if let Ok(rx) = mdns.shutdown() {
+-            let _ =
+-                tokio::task::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(2))).await;
+-        }
+-
+-        result.map(|peer_device| (pairing_file, host_alt_irk, peer_device))
++        })
++        .await
++        .map_err(|_| IdeviceError::Timeout)?
+     });
+ 
+-    match res {
+-        Ok((rpf, host_alt_irk, peer_device)) => {
+-            if !out_host_alt_irk.is_null() {
+-                unsafe {
+-                    std::ptr::copy_nonoverlapping(host_alt_irk.as_ptr(), out_host_alt_irk, 16);
+-                }
+-            }
+-            if !out_peer_device.is_null() {
+-                unsafe {
+-                    *out_peer_device = Box::into_raw(Box::new(peer_device_to_c(&peer_device)))
+-                };
++    match result {
++        Ok(pairing_file) => {
++            unsafe {
++                *out_pairing_file = Box::into_raw(Box::new(RpPairingFileHandle(pairing_file)));
+             }
+-            unsafe { *out_pairing_file = Box::into_raw(Box::new(RpPairingFileHandle(rpf))) };
+             null_mut()
+         }
+-        Err(e) => ffi_err!(e),
++        Err(error) => ffi_err!(error),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::errors::idevice_error_free;
++
++    struct CancelReset;
++
++    impl Drop for CancelReset {
++        fn drop(&mut self) {
++            aurora_pairable_host_set_cancelled(false);
++        }
++    }
++
++    #[test]
++    fn cancelled_accept_is_repeatable_and_clears_the_output() {
++        let _reset = CancelReset;
++        let name = CString::new("Aurora Location test").unwrap();
++        aurora_pairable_host_set_cancelled(true);
++
++        for _ in 0..2 {
++            let mut output = std::ptr::dangling_mut::<RpPairingFileHandle>();
++            let error = unsafe {
++                aurora_pairable_host_accept(
++                    name.as_ptr(),
++                    std::ptr::null(),
++                    None,
++                    null_mut(),
++                    None,
++                    null_mut(),
++                    None,
++                    null_mut(),
++                    &mut output,
++                )
++            };
++
++            assert!(!error.is_null());
++            assert_eq!(
++                unsafe { (*error).code },
++                IdeviceError::CanceledByUser.code()
++            );
++            assert!(output.is_null());
++            unsafe { idevice_error_free(error) };
++        }
+     }
+ }
+diff --git a/ffi/src/rp_pairing_file.rs b/ffi/src/rp_pairing_file.rs
+index 399db10..1609546 100644
+--- a/ffi/src/rp_pairing_file.rs
++++ b/ffi/src/rp_pairing_file.rs
+@@ -110,14 +110,14 @@ pub unsafe extern "C" fn rp_pairing_file_to_bytes(
+     }
+ 
+     let rpf = unsafe { &(*handle).0 };
+-    let xml = rpf.to_bytes();
++    let mut xml = rpf.to_bytes().into_boxed_slice();
+ 
+     let len = xml.len();
+-    let ptr = xml.as_ptr();
++    let ptr = xml.as_mut_ptr();
+     std::mem::forget(xml);
+ 
+     unsafe {
+-        *out_data = ptr as *mut u8;
++        *out_data = ptr;
+         *out_len = len;
+     }
+ 
+diff --git a/ffi/src/tunnel_provider.rs b/ffi/src/tunnel_provider.rs
+index 58dd1f8..0ab7ea1 100644
+--- a/ffi/src/tunnel_provider.rs
++++ b/ffi/src/tunnel_provider.rs
+@@ -324,17 +324,20 @@ pub unsafe extern "C" fn tunnel_create_rppairing(
+     let ctx = PinCtx(pin_context);
+ 
+     let res = run_sync_local(async {
+-        // Connect directly and use raw RPPairing protocol
+-        let stream = run_global_timeout(|| tokio::net::TcpStream::connect(socket_addr))
+-            .await
+-            .map_err(|e| IdeviceError::InternalError(format!("connect: {e}")))?;
+-        let conn = RpPairingSocket::new(stream);
+-
+-        let mut rpc = RemotePairingClient::new(conn, &host);
+-        rpc.connect(rpf, async || get_pin(pin_callback, &ctx))
+-            .await?;
+-
+-        finish_tunnel(&mut rpc, socket_addr).await
++        run_global_timeout(|| async {
++            // Connect directly and use raw RPPairing protocol
++            let stream = tokio::net::TcpStream::connect(socket_addr)
++                .await
++                .map_err(|e| IdeviceError::InternalError(format!("connect: {e}")))?;
++            let conn = RpPairingSocket::new(stream);
++
++            let mut rpc = RemotePairingClient::new(conn, &host);
++            rpc.connect(rpf, async || get_pin(pin_callback, &ctx))
++                .await?;
++
++            finish_tunnel(&mut rpc, socket_addr).await
++        })
++        .await
+     });
+ 
+     match res {
+diff --git a/idevice/src/remote_pairing/rp_pairing_file.rs b/idevice/src/remote_pairing/rp_pairing_file.rs
+index 1ac87c4..2df389a 100644
+--- a/idevice/src/remote_pairing/rp_pairing_file.rs
++++ b/idevice/src/remote_pairing/rp_pairing_file.rs
+@@ -8,7 +8,7 @@ use plist::Dictionary;
+ use plist_macro::plist_to_xml_bytes;
+ use rsa::rand_core::OsRng;
+ use serde::de::Error;
+-use tracing::{debug, warn};
++use tracing::warn;
+ 
+ use crate::IdeviceError;
+ 
+@@ -89,8 +89,6 @@ impl RpPairingFile {
+     /// Parse from plist bytes (XML or binary).
+     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IdeviceError> {
+         let mut p: Dictionary = plist::from_bytes(bytes)?;
+-        debug!("Read dictionary for rppairingfile: {p:#?}");
+-
+         let public_key = match p
+             .remove("public_key")
+             .and_then(|x| x.into_data())
+diff --git a/idevice/src/services/dvt/location_simulation.rs b/idevice/src/services/dvt/location_simulation.rs
+index d10139b..da76c82 100644
+--- a/idevice/src/services/dvt/location_simulation.rs
++++ b/idevice/src/services/dvt/location_simulation.rs
+@@ -74,11 +74,7 @@ impl<'a, R: ReadWrite> LocationSimulationClient<'a, R> {
+     pub async fn clear(&mut self) -> Result<(), IdeviceError> {
+         let method = Value::String("stopLocationSimulation".into());
+ 
+-        self.channel.call_method(Some(method), None, true).await?;
+-
+-        let _ = self.channel.read_message().await?;
+-
+-        Ok(())
++        self.channel.call_method(Some(method), None, false).await
+     }
+ 
+     /// Sets the GPS location

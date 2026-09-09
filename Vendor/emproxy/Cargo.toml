@@ -1,0 +1,14 @@
+[package]
+name = "aurora-emproxy"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+boringtun = { version = "=0.7.1", default-features = false }
+
+[lib]
+name = "aurora_emproxy"
+crate-type = ["staticlib", "rlib"]
+

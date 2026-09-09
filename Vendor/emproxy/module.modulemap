@@ -1,0 +1,5 @@
+module aurora_emproxy {
+    header "aurora_emproxy.h"
+    export *
+}
+

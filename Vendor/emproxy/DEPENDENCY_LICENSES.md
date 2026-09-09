@@ -1,0 +1,61 @@
+# iOS dependency license inventory
+
+This inventory is generated from `cargo metadata --locked --filter-platform aarch64-apple-ios` and the normal/build dependency tree for `aarch64-apple-ios`. Exact crates.io source checksums are recorded in `Cargo.lock`. The preserved `boringtun` BSD-3-Clause text is in `LICENSE.boringtun.txt`; every other package license text is also contained in its checksummed crates.io source archive.
+
+- `aead` `0.5.2`: `MIT OR Apache-2.0`
+- `base64` `0.22.1`: `MIT OR Apache-2.0`
+- `bitflags` `2.13.1`: `MIT OR Apache-2.0`
+- `blake2` `0.10.6`: `MIT OR Apache-2.0`
+- `block-buffer` `0.10.4`: `MIT OR Apache-2.0`
+- `boringtun` `0.7.1`: `BSD-3-Clause`
+- `cc` `1.4.5`: `MIT OR Apache-2.0`
+- `cfg-if` `1.0.4`: `MIT OR Apache-2.0`
+- `cfg_aliases` `0.2.2`: `MIT`
+- `chacha20` `0.9.1`: `Apache-2.0 OR MIT`
+- `chacha20poly1305` `0.10.1`: `Apache-2.0 OR MIT`
+- `cipher` `0.4.4`: `MIT OR Apache-2.0`
+- `crypto-common` `0.1.7`: `MIT OR Apache-2.0`
+- `curve25519-dalek` `4.1.3`: `BSD-3-Clause`
+- `digest` `0.10.7`: `MIT OR Apache-2.0`
+- `find-msvc-tools` `0.1.12`: `MIT OR Apache-2.0`
+- `generic-array` `0.14.7`: `MIT`
+- `getrandom` `0.2.17`: `MIT OR Apache-2.0`
+- `hex` `0.4.3`: `MIT OR Apache-2.0`
+- `hmac` `0.12.1`: `MIT OR Apache-2.0`
+- `inout` `0.1.4`: `MIT OR Apache-2.0`
+- `ip_network` `0.4.1`: `BSD-2-Clause`
+- `ip_network_table` `0.2.0`: `BSD-2-Clause`
+- `ip_network_table-deps-treebitmap` `0.5.0`: `MIT`
+- `libc` `0.2.189`: `MIT OR Apache-2.0`
+- `lock_api` `0.4.14`: `MIT OR Apache-2.0`
+- `nix` `0.31.3`: `MIT`
+- `once_cell` `1.21.4`: `MIT OR Apache-2.0`
+- `opaque-debug` `0.3.1`: `MIT OR Apache-2.0`
+- `parking_lot` `0.12.5`: `MIT OR Apache-2.0`
+- `parking_lot_core` `0.9.12`: `MIT OR Apache-2.0`
+- `pin-project-lite` `0.2.17`: `Apache-2.0 OR MIT`
+- `poly1305` `0.8.0`: `Apache-2.0 OR MIT`
+- `portable-atomic` `1.15.0`: `Apache-2.0 OR MIT`
+- `proc-macro2` `1.0.107`: `MIT OR Apache-2.0`
+- `quote` `1.0.47`: `MIT OR Apache-2.0`
+- `rand_core` `0.6.4`: `MIT OR Apache-2.0`
+- `ring` `0.17.14`: `Apache-2.0 AND ISC`
+- `rustc_version` `0.4.1`: `MIT OR Apache-2.0`
+- `scopeguard` `1.2.0`: `MIT OR Apache-2.0`
+- `semver` `1.0.28`: `MIT OR Apache-2.0`
+- `shlex` `2.0.1`: `MIT OR Apache-2.0`
+- `smallvec` `1.16.0`: `MIT OR Apache-2.0`
+- `subtle` `2.6.1`: `BSD-3-Clause`
+- `syn` `2.0.119`: `MIT OR Apache-2.0`
+- `tracing` `0.1.44`: `MIT`
+- `tracing-attributes` `0.1.31`: `MIT`
+- `tracing-core` `0.1.36`: `MIT`
+- `typenum` `1.20.1`: `MIT OR Apache-2.0`
+- `unicode-ident` `1.0.24`: `(MIT OR Apache-2.0) AND Unicode-3.0`
+- `universal-hash` `0.5.1`: `MIT OR Apache-2.0`
+- `untrusted` `0.9.0`: `ISC`
+- `version_check` `0.9.5`: `MIT OR Apache-2.0`
+- `x25519-dalek` `2.0.1`: `BSD-3-Clause`
+- `zeroize` `1.9.0`: `Apache-2.0 OR MIT`
+- `zeroize_derive` `1.5.0`: `Apache-2.0 OR MIT`
+
