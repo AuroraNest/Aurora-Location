@@ -2,7 +2,7 @@
 
 [中文](README.md)
 
-Aurora Location is a personal iPhone development and testing tool for simulated location. Its SwiftUI and MapKit interface selects a coordinate, then uses Apple DVT `LocationSimulation` to request a simulated or restored real location. It does not modify third-party apps, provide detection evasion, or target App Store distribution.
+Aurora Location is a location-changing tool for your personal iPhone. Its SwiftUI and MapKit interface selects a coordinate, then uses Apple DVT `LocationSimulation` to request a simulated or restored real location. It does not modify third-party apps, provide detection evasion, or target App Store distribution.
 
 The project implements an on-device iOS 27 `Remote Pairing` flow and establishes its developer connection through an existing single-VPN Shadowrocket setup. User physical-device feedback confirms successful simulated location with Aurora Location + Shadowrocket single VPN, and both the system pairing list and saved App pairing record have been confirmed. That does not establish every scenario: the complete set/change-point/clear matrix, Apple Maps rechecks, foreground/background retention, and new cellular connection remain physical-device acceptance work in the [test plan](docs/TEST_PLAN.md).
 

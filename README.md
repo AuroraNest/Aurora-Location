@@ -2,7 +2,7 @@
 
 [English](README.en.md)
 
-Aurora Location 是面向个人 iPhone 开发和测试的定位模拟工具. 它以 SwiftUI 和 MapKit 选点, 通过 Apple DVT `LocationSimulation` 请求设置模拟坐标或恢复真实定位. 它不修改第三方 App, 不提供规避第三方检测的功能, 也不以 App Store 发布为目标.
+Aurora Location 是面向个人 iPhone 修改定位工具. 它以 SwiftUI 和 MapKit 选点, 通过 Apple DVT `LocationSimulation` 请求设置模拟坐标或恢复真实定位. 它不修改第三方 App, 不提供规避第三方检测的功能, 也不以 App Store 发布为目标.
 
 项目实现了 iOS 27 本机 `Remote Pairing`, 并通过既有 Shadowrocket 单 VPN 配置建立开发者连接. 已有用户真机反馈确认 Aurora Location + Shadowrocket 单 VPN 的模拟定位成功, 系统配对列表和 App 配对保存也已确认. 这不等于所有场景均已验收: 完整的 set/换点/clear 矩阵, Apple Maps 复核, 前后台保持和纯蜂窝新连接仍须按 [测试计划](docs/TEST_PLAN.md) 在真机逐项验收.
 
