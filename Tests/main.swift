@@ -1,5 +1,15 @@
 import Foundation
 import CryptoKit
+import CoreLocation
+
+let observationTime = Date(timeIntervalSince1970: 1_700_000_000)
+let validObservation = CLLocation(coordinate: CLLocationCoordinate2D(latitude: 1, longitude: 2), altitude: 0,
+    horizontalAccuracy: 10, verticalAccuracy: -1, timestamp: observationTime)
+assert(Coordinate.observedLocation(validObservation, now: observationTime) == Coordinate(latitude: 1, longitude: 2))
+assert(Coordinate.observedLocation(validObservation, now: observationTime.addingTimeInterval(31)) == nil)
+let invalidObservation = CLLocation(coordinate: validObservation.coordinate, altitude: 0,
+    horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: observationTime)
+assert(Coordinate.observedLocation(invalidObservation, now: observationTime) == nil)
 
 func parse(_ value: String) throws -> LocationCommand {
     try LocationCommand(url: URL(string: value)!)

@@ -97,7 +97,7 @@ auroralocation://set?lat=40.7580&lon=-73.9855
 auroralocation://clear
 ```
 
-`set` accepts only finite `lat` and `lon`: latitude from -90 to 90 and longitude from -180 to 180. Duplicate, missing, or extra parameters, fragments, userinfo, ports, invalid paths/schemes, `NaN`, and `Infinity` are rejected. URLs and UI controls share pairing and network gates. There are no App Intents, background automation, or scheduled retries.
+`set` accepts only finite `lat` and `lon`: latitude from -90 to 90 and longitude from -180 to 180. Duplicate, missing, or extra parameters, fragments, userinfo, ports, invalid paths/schemes, `NaN`, and `Infinity` are rejected. URLs and UI controls share pairing and network gates. While simulating, the app resends the applied coordinate every 4 seconds without following unapplied map selections, writing history, or triggering haptics. Clear or a maintenance failure stops these writes; there is no unlimited reconnect loop. There are no App Intents.
 
 ## Troubleshooting
 
@@ -109,20 +109,21 @@ auroralocation://clear
 | Port is reachable but handshake fails | Confirm the node is actually named `AuroraLocal`, the module refers to that name, then inspect Shadowrocket routing/connection records for the local address. TCP-ready does not prove a service response. |
 | WireGuard has counters but DVT fails | Counters only show local data-plane receipt, authentication, or reflection. Check Developer Mode and Xcode device preparation/DDI. |
 | Map does not change after set/clear | Do not rely on Last operation. Verify with Apple Maps, check Shadowrocket and the developer connection, and treat a failure as unknown state. |
-| Location restores after backgrounding or lock | This is a known limitation. The exported peer has WireGuard `PersistentKeepalive = 25`, but the app does not use iOS background audio, automatic retry, or a background keep-alive mechanism to retain simulation. |
+| Location restores after backgrounding or lock | Enable background location monitoring in Settings and grant Always authorization. Periodic writes support the current session and stop on clear. On 2026-09-11, the user confirmed the target persisted with Wi-Fi after unplugging the phone and locking it for at least 2 minutes. Longer retention still needs validation. No background audio is used. |
 
 ## Privacy and security
 
 - Pairing records and WireGuard keys live in Application Support with Complete Data Protection, owner-only directory permissions, and backup exclusion.
 - PINs are not logged. Redacted diagnostics contain only version, pairing-present state, network/service state, responder counters, and fixed error codes.
 - Favorites and history are local only. There are no accounts, analytics, self-hosted servers, or cloud sync.
+- Background monitoring does not save or upload observed coordinates. Debug builds keep only the latest 40 authorization, lifecycle, and command-status events locally, without coordinates or pairing data.
 - MapKit search, maps, and reverse geocoding use Apple services, so those features are not fully offline.
 - Connection configuration and pairing records are sensitive. Deleting the app or its data can remove local credentials, requiring new pairing and peer export.
 
 ## Limits and acceptance boundary
 
 - Simulated location is not promised to persist indefinitely in the background. iOS may restore real location after suspending or terminating the app.
-- New cellular-only sessions, retention across Wi-Fi-to-cellular transition, new sessions on Wi-Fi without internet, clear after restart, and behavior in all target apps remain unverified.
+- Physical-device tests on 2026-09-11 still failed to open a cellular-only session with a socket unexpected EOF; changing the location after switching from Wi-Fi to cellular also failed. Cellular support remains unresolved. New sessions on Wi-Fi without internet, clear after restart, and behavior in all target apps remain unverified.
 - User physical-device feedback confirms single-VPN simulated location, but the full set/change-point/clear, Apple Maps, restart, foreground/background, and cellular acceptance matrix remains incomplete.
 - The app does not download or mount DDI. If developer services fail, prepare the device again in Xcode.
 - There is no joystick, GPX, route playback, account, cloud sync, detection evasion, embedded VPN, or Simulator DVT.

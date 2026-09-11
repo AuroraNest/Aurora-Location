@@ -8,10 +8,12 @@ enum LocationEngine {
     private static var handshake: OpaquePointer?
     private static var server: OpaquePointer?
     private static var simulation: OpaquePointer?
+    private static var failureDetails = ""
 
     static func perform(_ command: LocationCommand?, pairingPath: String) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
+                failureDetails = ""
                 do {
                     if case .set(let coordinate) = command, !coordinate.isValid {
                         throw AuroraLocationError.invalidCoordinate
@@ -48,6 +50,12 @@ enum LocationEngine {
         }
     }
 
+    static func lastFailureDetails() async -> String {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: failureDetails) }
+        }
+    }
+
     private static func connect(pairingPath: String) throws {
         idevice_set_global_timeout(10)
         var pairing: OpaquePointer?
@@ -75,7 +83,20 @@ enum LocationEngine {
 
     private static func checked(_ error: UnsafeMutablePointer<IdeviceFfiError>?, as failure: AuroraLocationError) throws {
         if let error {
-            // FFI messages can contain peer data. Diagnostics expose only our fixed error code.
+            // Raw peer messages may contain private data. Expose only numeric codes and fixed categories.
+            let message = error.pointee.message.flatMap { String(validatingUTF8: $0) }?.lowercased() ?? ""
+            let category: String
+            if message.contains("connection refused") || message.contains("connectionrefused") { category = "连接被拒绝" }
+            else if message.contains("timeout") || message.contains("timed out") || message.contains("timedout") { category = "超时" }
+            else if message.contains("connection reset") || message.contains("connectionreset") { category = "连接被复位" }
+            else if message.contains("unexpectedeof") || message.contains("failed to fill whole buffer") { category = "连接提前关闭" }
+            else if message.contains("networkunreachable") || message.contains("network is unreachable") { category = "网络不可达" }
+            else if message.contains("hostunreachable") || message.contains("no route to host") { category = "主机不可达" }
+            else if message.contains("notconnected") || message.contains("not connected") { category = "连接已断开" }
+            else if message.contains("brokenpipe") || message.contains("broken pipe") { category = "连接写入中断" }
+            else if message.contains("permissiondenied") || message.contains("permission denied") { category = "系统拒绝访问" }
+            else { category = "其他协议错误" }
+            failureDetails = "\(failure.rawValue): \(category), code \(error.pointee.code), sub \(error.pointee.sub_code)"
             idevice_error_free(error)
             throw failure
         }

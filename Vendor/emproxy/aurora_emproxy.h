@@ -14,6 +14,11 @@ typedef struct AuroraEMProxyStats {
     uint64_t authenticated_ipv4;
     uint64_t reflected_ipv4;
     uint64_t rejected_packets;
+    /* 0 none, 1 endpoint, 2 no session, 3 session index, 4 WireGuard validation,
+       5 IPv4 filter, 6 IPv6. Describes the most recent rejection only. */
+    uint64_t last_rejection;
+    uint64_t tcp_resets;
+    uint64_t pairing_port_resets;
 } AuroraEMProxyStats;
 
 enum {
@@ -56,4 +61,3 @@ int32_t aurora_emproxy_stop(AuroraEMProxyHandle **handle);
 #endif
 
 #endif
-

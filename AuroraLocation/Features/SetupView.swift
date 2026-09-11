@@ -5,6 +5,7 @@ struct SetupView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var state: AppState
     @ObservedObject private var pairing: PairingService
+    @ObservedObject private var monitor: LocationMonitor
     @State private var copied = false
     @State private var configCopied = false
     @State private var exportError: String?
@@ -12,6 +13,7 @@ struct SetupView: View {
     init(state: AppState) {
         _state = ObservedObject(wrappedValue: state)
         _pairing = ObservedObject(wrappedValue: state.pairing)
+        _monitor = ObservedObject(wrappedValue: state.locationMonitor)
     }
 
     var body: some View {
@@ -29,6 +31,19 @@ struct SetupView: View {
                         Task { await state.checkConnection() }
                     }
                     .disabled(pairing.isBusy || state.isBusy)
+                }
+
+                Section("后台位置监测") {
+                    Text(monitor.status)
+                    Button("启用监测 / 申请始终定位", systemImage: "location") { monitor.enable() }
+                    Button("打开系统权限设置", systemImage: "gear") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                    if monitor.isEnabled {
+                        Button("关闭监测", role: .destructive) { monitor.disable() }
+                    }
+                    Text("接收系统位置更新并显示目标偏差, 不保存或上传观测位置. 模拟定位结束后停止, 会增加耗电并显示定位指示. 强制退出或系统终止后不能继续保持.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
 
                 Section("Shadowrocket 本机连接") {

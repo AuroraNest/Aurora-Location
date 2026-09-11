@@ -7,6 +7,7 @@ enum NetworkStatus {
 
 @_silgen_name("aurora_test_count") private func count(_ index: Int32) -> Int32
 @_silgen_name("aurora_test_fail_set") private func failNextSet()
+@_silgen_name("aurora_test_fail_eof") private func failNextEOF()
 
 @main
 struct EngineSessionCheck {
@@ -28,11 +29,21 @@ struct EngineSessionCheck {
             assertionFailure("Expected failed set")
         } catch { assert(error as? AuroraLocationError == .locationSimulationFailed) }
         assert(count(0) == 3 && count(6) == 3 && count(7) == 1)
+        let failure = await LocationEngine.lastFailureDetails()
+        assert(failure.contains("code 42, sub 7") && failure.contains("超时"))
+        assert(!failure.contains("PRIVATE_PEER_DATA"))
         try await LocationEngine.perform(.set(.timesSquare), pairingPath: path)
         assert(count(0) == 4 && count(6) == 3)
         await LocationEngine.disconnect()
         await LocationEngine.disconnect()
         assert(count(6) == 4)
+        failNextEOF()
+        do {
+            try await LocationEngine.perform(.set(.timesSquare), pairingPath: path)
+            assertionFailure("Expected EOF")
+        } catch { assert(error as? AuroraLocationError == .locationSimulationFailed) }
+        let eof = await LocationEngine.lastFailureDetails()
+        assert(eof.contains("连接提前关闭") && !eof.contains("PRIVATE_PEER_DATA"))
         print("PASS: set retains session, next set reuses it, check preserves it, clear/failure clean up, retry reconnects; no Wi-Fi gate")
     }
 }

@@ -1,4 +1,15 @@
 import Foundation
+import CoreLocation
+
+extension Coordinate {
+    static func observedLocation(_ location: CLLocation, now: Date = Date()) -> Coordinate? {
+        let coordinate = Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
+        guard coordinate.isValid, location.horizontalAccuracy.isFinite,
+              location.horizontalAccuracy >= 0,
+              abs(location.timestamp.timeIntervalSince(now)) <= 30 else { return nil }
+        return coordinate
+    }
+}
 
 struct Coordinate: Codable, Equatable, Sendable {
     let latitude: Double

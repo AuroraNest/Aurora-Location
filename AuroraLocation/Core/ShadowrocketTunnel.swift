@@ -35,7 +35,10 @@ enum ShadowrocketTunnel {
                 let summary = valid
                     ? "UDP \(stats.received_udp), 解密 \(stats.authenticated_ipv4), 回送 \(stats.reflected_ipv4), 拒绝 \(stats.rejected_packets)"
                     : "中继未运行"
-                continuation.resume(returning: result == 0 ? summary : summary + ", 停止异常")
+                let reasons = ["无", "来源不匹配", "WireGuard 会话不存在", "WireGuard 会话索引不匹配", "WireGuard 校验失败", "IPv4 过滤", "不支持 IPv6"]
+                let reason = stats.last_rejection < UInt64(reasons.count) ? reasons[Int(stats.last_rejection)] : "未知"
+                let details = summary + ", TCP 复位 \(stats.tcp_resets) (49152 发出 \(stats.pairing_port_resets))" + (stats.rejected_packets > 0 ? ", 最近拒绝: " + reason : "")
+                continuation.resume(returning: result == 0 ? details : details + ", 停止异常")
             }
         }
     }

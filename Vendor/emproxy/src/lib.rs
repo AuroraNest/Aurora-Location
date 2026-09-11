@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use boringtun::noise::{Tunn, TunnResult};
+use boringtun::noise::{errors::WireGuardError, Tunn, TunnResult};
 use boringtun::x25519::{PublicKey, StaticSecret};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,6 +34,9 @@ struct Counters {
     authenticated_ipv4: AtomicU64,
     reflected_ipv4: AtomicU64,
     rejected_packets: AtomicU64,
+    last_rejection: AtomicU64,
+    tcp_resets: AtomicU64,
+    pairing_port_resets: AtomicU64,
 }
 
 #[repr(C)]
@@ -42,6 +45,9 @@ pub struct AuroraEMProxyStats {
     pub authenticated_ipv4: u64,
     pub reflected_ipv4: u64,
     pub rejected_packets: u64,
+    pub last_rejection: u64,
+    pub tcp_resets: u64,
+    pub pairing_port_resets: u64,
 }
 
 struct Worker {
@@ -141,6 +147,7 @@ fn run_proxy(
                         || peer_endpoint.is_some_and(|current| current != endpoint)
                     {
                         counters.rejected_packets.fetch_add(1, Ordering::Relaxed);
+                        counters.last_rejection.store(1, Ordering::Relaxed);
                         continue;
                     }
 
@@ -194,8 +201,24 @@ fn process_datagram(
     loop {
         match tunnel.decapsulate(Some(endpoint.ip()), input, decrypted) {
             TunnResult::Done => return authenticated,
-            TunnResult::Err(_) => {
+            TunnResult::Err(error) => {
                 counters.rejected_packets.fetch_add(1, Ordering::Relaxed);
+                let reason = match error {
+                    WireGuardError::NoCurrentSession => {
+                        // Restarting the app loses session keys while the local VPN can retain them.
+                        // Initiate the standard authenticated handshake; do not trust or pin this packet.
+                        // ponytail: one-shot localhost recovery; add timed retries if local packet loss is observed.
+                        if let TunnResult::WriteToNetwork(packet) =
+                            tunnel.format_handshake_initiation(encrypted, false)
+                        {
+                            let _ = socket.send_to(packet, endpoint);
+                        }
+                        2
+                    }
+                    WireGuardError::WrongIndex => 3,
+                    _ => 4,
+                };
+                counters.last_rejection.store(reason, Ordering::Relaxed);
                 return authenticated;
             }
             TunnResult::WriteToNetwork(packet) => {
@@ -205,6 +228,14 @@ fn process_datagram(
                 authenticated = true;
                 counters.authenticated_ipv4.fetch_add(1, Ordering::Relaxed);
                 if remap_pairing_packet(packet) {
+                    let tcp_flags = packet[usize::from(packet[0] & 0x0f) * 4 + 13];
+                    if tcp_flags & 0x04 != 0 {
+                        counters.tcp_resets.fetch_add(1, Ordering::Relaxed);
+                        let offset = usize::from(packet[0] & 0x0f) * 4;
+                        if u16::from_be_bytes([packet[offset], packet[offset + 1]]) == PAIRING_PORT {
+                            counters.pairing_port_resets.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
                     if let TunnResult::WriteToNetwork(packet) =
                         tunnel.encapsulate(packet, encrypted)
                     {
@@ -214,11 +245,13 @@ fn process_datagram(
                     }
                 } else {
                     counters.rejected_packets.fetch_add(1, Ordering::Relaxed);
+                    counters.last_rejection.store(5, Ordering::Relaxed);
                 }
             }
             TunnResult::WriteToTunnelV6(_, _) => {
                 authenticated = true;
                 counters.rejected_packets.fetch_add(1, Ordering::Relaxed);
+                counters.last_rejection.store(6, Ordering::Relaxed);
             }
         }
         input = &[];
@@ -369,6 +402,9 @@ pub unsafe extern "C" fn aurora_emproxy_get_stats(
         authenticated_ipv4: counters.authenticated_ipv4.load(Ordering::Relaxed),
         reflected_ipv4: counters.reflected_ipv4.load(Ordering::Relaxed),
         rejected_packets: counters.rejected_packets.load(Ordering::Relaxed),
+        last_rejection: counters.last_rejection.load(Ordering::Relaxed),
+        tcp_resets: counters.tcp_resets.load(Ordering::Relaxed),
+        pairing_port_resets: counters.pairing_port_resets.load(Ordering::Relaxed),
     };
     AURORA_EMPROXY_OK
 }
@@ -532,6 +568,60 @@ mod tests {
         assert!(!remap_pairing_packet(&mut fragmented));
 
         assert!(!remap_pairing_packet(&mut [0_u8; 12]));
+    }
+
+    #[test]
+    fn responder_restart_recovers_the_existing_client_session() {
+        let client_key = random_array();
+        let server_key = random_array();
+        let client_public = PublicKey::from(&StaticSecret::from(client_key));
+        let server_public = PublicKey::from(&StaticSecret::from(server_key));
+        let mut client = Tunn::new(StaticSecret::from(client_key), server_public, None, None, 1, None);
+        let mut server = Tunn::new(StaticSecret::from(server_key), client_public, None, None, 0, None);
+        establish(&mut client, &mut server);
+        let mut client_buffer = vec![0; 2048];
+        let stale = match client.encapsulate(&test_packet(52_000, PAIRING_PORT), &mut client_buffer) {
+            TunnResult::WriteToNetwork(packet) => packet.to_vec(),
+            _ => panic!("client must have an established session"),
+        };
+        server = Tunn::new(StaticSecret::from(server_key), client_public, None, None, 0, None);
+        let sender = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let receiver = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        receiver.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let endpoint = receiver.local_addr().unwrap();
+        let counters = Counters::default();
+        let mut decrypted = vec![0; 2048];
+        let mut encrypted = vec![0; 2048];
+        assert!(!process_datagram(&sender, &mut server, endpoint, &stale, &mut decrypted, &mut encrypted, &counters));
+        assert_eq!(counters.last_rejection.load(Ordering::Relaxed), 2);
+        let mut incoming = vec![0; 2048];
+        let length = receiver.recv(&mut incoming).unwrap();
+        let response = match client.decapsulate(None, &incoming[..length], &mut client_buffer) {
+            TunnResult::WriteToNetwork(packet) => packet.to_vec(),
+            _ => panic!("client must answer the recovery handshake"),
+        };
+        process_datagram(&sender, &mut server, endpoint, &response, &mut decrypted, &mut encrypted, &counters);
+        let length = receiver.recv(&mut incoming).unwrap();
+        assert!(matches!(client.decapsulate(None, &incoming[..length], &mut client_buffer), TunnResult::Done));
+        let fresh = match client.encapsulate(&test_packet(52_000, PAIRING_PORT), &mut client_buffer) {
+            TunnResult::WriteToNetwork(packet) => packet.to_vec(),
+            _ => panic!("client must use the recovered session"),
+        };
+        assert!(process_datagram(&sender, &mut server, endpoint, &fresh, &mut decrypted, &mut encrypted, &counters));
+        assert_eq!(counters.reflected_ipv4.load(Ordering::Relaxed), 1);
+        assert_eq!(counters.tcp_resets.load(Ordering::Relaxed), 0);
+        let mut reset = test_packet(PAIRING_PORT, 52_000);
+        reset[33] = 0x14;
+        reset[36..38].fill(0);
+        let checksum = !tcp_checksum(&reset, 20, 40);
+        reset[36..38].copy_from_slice(&checksum.to_be_bytes());
+        let reset_data = match client.encapsulate(&reset, &mut client_buffer) {
+            TunnResult::WriteToNetwork(packet) => packet.to_vec(),
+            _ => panic!("client must encrypt reset"),
+        };
+        assert!(process_datagram(&sender, &mut server, endpoint, &reset_data, &mut decrypted, &mut encrypted, &counters));
+        assert_eq!(counters.tcp_resets.load(Ordering::Relaxed), 1);
+        assert_eq!(counters.pairing_port_resets.load(Ordering::Relaxed), 1);
     }
 
     #[test]

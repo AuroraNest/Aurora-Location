@@ -13,7 +13,10 @@
     <key>LSRequiresIPhoneOS</key><true/>
     <key>UILaunchScreen</key><dict/>
     <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
-    <key>NSLocalNetworkUsageDescription</key><string>通过本地网络完成本机设备配对, 并连接 LocalDevVPN 开发者隧道.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>通过本地网络完成本机设备配对, 并连接 Shadowrocket 本机开发者隧道.</string>
+    <key>NSLocationWhenInUseUsageDescription</key><string>读取系统当前位置, 观察模拟定位与目标位置的偏差. 不保存或上传观测位置.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key><string>在切换 App 或锁屏后继续监测系统位置和目标偏差, 支持当前定位会话. 恢复真实定位后停止监测.</string>
+    <key>UIBackgroundModes</key><array><string>location</string></array>
     <key>NSBonjourServices</key><array><string>_remotepairing-pairable-host._tcp</string></array>
     <key>CFBundleURLTypes</key><array><dict>
         <key>CFBundleURLName</key><string>com.auroraleelabs.AuroraLocation</string>

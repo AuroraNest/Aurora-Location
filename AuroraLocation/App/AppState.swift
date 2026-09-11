@@ -18,9 +18,11 @@ final class AppState: ObservableObject {
     @Published var relayStatus = "尚未运行"
     @Published var showSetup = false
     let pairing = PairingService()
+    let locationMonitor = LocationMonitor()
     private var lastErrorCode = "none"
     private var storageLoaded = false
     private var pairingObservation: AnyCancellable?
+    private var maintenanceTask: Task<Void, Never>?
 
     init() {
         loadPlaces()
@@ -32,6 +34,7 @@ final class AppState: ObservableObject {
     }
 
     func refresh() {
+        locationMonitor.recordDebugEvent("refresh")
         wifiAvailable = NetworkStatus.hasWiFiAddress
         pairing.refresh()
         if !isSimulating {
@@ -42,6 +45,7 @@ final class AppState: ObservableObject {
     }
 
     func enteredBackground() {
+        locationMonitor.recordDebugEvent("background simulating=\(isSimulating)")
         guard isSimulating else { return }
         developerStatus = "会话已保留, 后台持续状态未知"
         relayStatus = "中继未主动关闭, 系统可能暂停运行"
@@ -60,15 +64,20 @@ final class AppState: ObservableObject {
             return
         }
         isBusy = true
+        stopMaintenance()
         errorMessage = nil
+        var engineAttempted = false
         do {
             try await prepareConnection()
             let path = try PairingStore.fileURL().path
+            engineAttempted = true
             try await LocationEngine.perform(command, pairingPath: path)
             lastErrorCode = "none"
             switch command {
             case .set(let coordinate):
                 isSimulating = true
+                locationMonitor.setTarget(coordinate)
+                startMaintenance(coordinate, pairingPath: path)
                 developerStatus = "指令已完成, 会话已保留"
                 relayStatus = "中继运行中, 支持当前定位会话"
                 let name = selected == coordinate ? selectedName : coordinate.label
@@ -79,15 +88,18 @@ final class AppState: ObservableObject {
                 savePlaces(snapshot)
             case .clear:
                 isSimulating = false
+                locationMonitor.stop()
                 developerStatus = "恢复指令已完成, 会话已关闭"
                 lastOperation = "最近操作: 已发送恢复真实定位指令"
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch {
             isSimulating = false
+            locationMonitor.stop()
             await LocationEngine.disconnect()
             lastOperation = "状态未知"
             developerStatus = "连接或指令未完成"
+            if engineAttempted { developerStatus += " / " + (await LocationEngine.lastFailureDetails()) }
             report(error as? AuroraLocationError ?? .pairingInvalid)
         }
         if !isSimulating { relayStatus = await ShadowrocketTunnel.stop() }
@@ -102,13 +114,16 @@ final class AppState: ObservableObject {
         }
         isBusy = true
         errorMessage = nil
+        var engineAttempted = false
         do {
             try await prepareConnection()
+            engineAttempted = true
             try await LocationEngine.perform(nil, pairingPath: PairingStore.fileURL().path)
             developerStatus = "检测成功, 会话已关闭"
             lastErrorCode = "none"
         } catch {
             developerStatus = "检测未完成"
+            if engineAttempted { developerStatus += " / " + (await LocationEngine.lastFailureDetails()) }
             report(error as? AuroraLocationError ?? .pairingInvalid)
         }
         relayStatus = await ShadowrocketTunnel.stop()
@@ -130,6 +145,46 @@ final class AppState: ObservableObject {
         tunnelStatus = reachable ? "本机端口可达" : "本机端口不可达"
         guard reachable else { throw AuroraLocationError.tunnelUnavailable }
         developerStatus = "正在连接"
+    }
+
+    private func startMaintenance(_ coordinate: Coordinate, pairingPath: String) {
+        // Refresh the applied coordinate, not the map selection. No history writes or haptics.
+        maintenanceTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(4)) }
+                catch { return }
+                guard !Task.isCancelled,
+                      await self?.maintainSession(coordinate, pairingPath: pairingPath) == true else { return }
+            }
+        }
+    }
+
+    private func stopMaintenance() {
+        maintenanceTask?.cancel()
+        maintenanceTask = nil
+        locationMonitor.recordDebugEvent("maintenanceStopped")
+    }
+
+    private func maintainSession(_ coordinate: Coordinate, pairingPath: String) async -> Bool {
+        guard isSimulating else { return false }
+        guard !isBusy, !pairing.isBusy else { return true }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await LocationEngine.perform(.set(coordinate), pairingPath: pairingPath)
+            locationMonitor.recordDebugEvent("maintenanceSet")
+            return true
+        } catch {
+            // ponytail: stop on disconnect; add bounded reconnect after handshake recovery is validated.
+            stopMaintenance()
+            isSimulating = false
+            locationMonitor.stop()
+            lastOperation = "定位保持中断, 状态未知"
+            developerStatus = "保持指令未完成 / " + (await LocationEngine.lastFailureDetails())
+            report(error as? AuroraLocationError ?? .locationSimulationFailed)
+            relayStatus = await ShadowrocketTunnel.stop()
+            return false
+        }
     }
 
     func addFavorite(name: String) {
@@ -192,6 +247,7 @@ final class AppState: ObservableObject {
     }
 
     private func report(_ error: AuroraLocationError) {
+        locationMonitor.recordDebugEvent("error=\(error.rawValue) wifi=\(NetworkStatus.hasWiFiAddress) detail=\(developerStatus)")
         lastErrorCode = error.rawValue
         errorMessage = error.localizedDescription
     }

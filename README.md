@@ -97,7 +97,7 @@ auroralocation://set?lat=40.7580&lon=-73.9855
 auroralocation://clear
 ```
 
-`set` 只接受有限的 `lat` 和 `lon`. 纬度范围 -90 至 90, 经度范围 -180 至 180. 重复、缺失或额外参数, fragment, userinfo, port, 非法 path/scheme, `NaN` 和 `Infinity` 均会被拒绝. URL 与界面按钮共用同一配对和网络前置检查. 当前没有 App Intents, 后台自动执行或定时重发.
+`set` 只接受有限的 `lat` 和 `lon`. 纬度范围 -90 至 90, 经度范围 -180 至 180. 重复、缺失或额外参数, fragment, userinfo, port, 非法 path/scheme, `NaN` 和 `Infinity` 均会被拒绝. URL 与界面按钮共用同一配对和网络前置检查. 模拟期间每 4 秒重发已应用的坐标, 不跟随尚未应用的地图选点, 不重复写历史或振动. 恢复真实定位或保持失败后停止重发, 不无限重连. 当前没有 App Intents.
 
 ## 故障排查
 
@@ -109,20 +109,22 @@ auroralocation://clear
 | 端口可达但握手失败 | 节点实际名称是否为 `AuroraLocal`, 模块是否引用同名节点. 检查 Shadowrocket 对本地地址的规则/连接记录. TCP ready 不能证明服务响应. |
 | WireGuard 有统计但 DVT 失败 | 统计仅表示本地数据面收到、认证或回送流量. 检查 Developer Mode 和 Xcode 设备准备/DDI. |
 | set/clear 后地图未变化 | 不要依据最近操作判断. 用 Apple Maps 验证, 检查 Shadowrocket 和开发者连接, 失败后按未知状态处理. |
-| 切后台或锁屏后位置恢复 | 当前已知限制. 导出的 peer 有 WireGuard `PersistentKeepalive = 25`, 但 App 不使用 iOS 后台音频、自动重发或后台保活机制维持模拟. |
+| 切后台或锁屏后位置恢复 | 在设置启用后台位置监测, 并授予始终定位权限. 定期重发支持当前会话, clear 后停止. 2026-09-11 真机拔线后 Wi-Fi 锁屏至少 2 分钟仍保持目标位置; 更长时间仍须验证. 不使用后台音频. |
 
 ## 隐私和安全
 
 - 配对记录和 WireGuard keys 位于 Application Support, 使用 Complete Data Protection, owner-only 目录权限, 并排除 iCloud/iTunes backup.
 - PIN 不写入日志. 脱敏诊断只含版本、配对存在标记、网络/服务状态、中继统计和固定错误码.
 - 收藏和历史仅存本机. 没有账号、analytics、自建服务器或云同步.
+- 后台监测的观测位置不保存或上传; 会显示系统定位指示并增加耗电, 可在设置关闭.
+- Debug 构建仅在本机保留最近 40 条权限、生命周期和指令状态事件, 不含坐标或配对数据.
 - MapKit 搜索、地图和反向地理编码会使用 Apple 服务, 因此不是完全离线功能.
 - 连接配置和配对记录是敏感材料. 删除 App 或清除数据可能删除本地凭据, 之后需要重新配对并重新导出 peer.
 
 ## 限制和验收边界
 
 - 不承诺模拟位置可无限后台保持. iOS 挂起或终止 App 后可能恢复真实位置.
-- 纯蜂窝新会话, Wi-Fi 到蜂窝切换保持, 无互联网 Wi-Fi 新会话, 重启后 clear 和全部目标 App 行为仍未验证.
+- 2026-09-11 真机纯蜂窝新建握手仍失败, 分类为 socket 提前关闭; Wi-Fi 切蜂窝后换点也失败. 蜂窝支持尚未解决. 无互联网 Wi-Fi 新会话, 重启后 clear 和全部目标 App 行为仍未验证.
 - 已有用户真机反馈确认单 VPN 模拟定位成功, 但完整的 set/换点/clear、Apple Maps、重启、前后台和蜂窝网络验收矩阵仍未完成.
 - 不自动下载或挂载 DDI. 开发者服务出错时先用 Xcode 重新准备设备.
 - 不实现 joystick, GPX, 路线, 账号, 云同步, 反检测, 内置 VPN 或 Simulator DVT.
