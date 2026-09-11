@@ -24,7 +24,7 @@ final class LocationMonitor: NSObject, ObservableObject, @preconcurrency CLLocat
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         manager.distanceFilter = kCLDistanceFilterNone
         manager.pausesLocationUpdatesAutomatically = false
-        manager.showsBackgroundLocationIndicator = true
+        manager.showsBackgroundLocationIndicator = false
     }
 
     func enable() {
