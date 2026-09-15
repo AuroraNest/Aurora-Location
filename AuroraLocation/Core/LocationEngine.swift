@@ -96,7 +96,9 @@ enum LocationEngine {
             else if message.contains("brokenpipe") || message.contains("broken pipe") { category = "连接写入中断" }
             else if message.contains("permissiondenied") || message.contains("permission denied") { category = "系统拒绝访问" }
             else { category = "其他协议错误" }
-            failureDetails = "\(failure.rawValue): \(category), code \(error.pointee.code), sub \(error.pointee.sub_code)"
+            let stage = message.contains("tls tunnel:") ? "tunnel-tcp" :
+                (message.contains("connect:") ? "pairing-tcp" : "unspecified")
+            failureDetails = "\(failure.rawValue): \(category), code \(error.pointee.code), sub \(error.pointee.sub_code), stage \(stage)"
             idevice_error_free(error)
             throw failure
         }

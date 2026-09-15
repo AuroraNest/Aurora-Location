@@ -8,6 +8,7 @@ enum NetworkStatus {
 @_silgen_name("aurora_test_count") private func count(_ index: Int32) -> Int32
 @_silgen_name("aurora_test_fail_set") private func failNextSet()
 @_silgen_name("aurora_test_fail_eof") private func failNextEOF()
+@_silgen_name("aurora_test_fail_connect") private func failNextConnect()
 
 @main
 struct EngineSessionCheck {
@@ -44,6 +45,14 @@ struct EngineSessionCheck {
         } catch { assert(error as? AuroraLocationError == .locationSimulationFailed) }
         let eof = await LocationEngine.lastFailureDetails()
         assert(eof.contains("连接提前关闭") && !eof.contains("PRIVATE_PEER_DATA"))
+        failNextConnect()
+        do {
+            try await LocationEngine.perform(.set(.timesSquare), pairingPath: path)
+            assertionFailure("Expected refused connection")
+        } catch { assert(error as? AuroraLocationError == .locationSimulationFailed) }
+        let refused = await LocationEngine.lastFailureDetails()
+        assert(refused.contains("stage pairing-tcp") && refused.contains("连接被拒绝"))
+        assert(!refused.contains("PRIVATE_PEER_DATA"))
         print("PASS: set retains session, next set reuses it, check preserves it, clear/failure clean up, retry reconnects; no Wi-Fi gate")
     }
 }
