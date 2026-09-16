@@ -6,6 +6,31 @@ import UIKit
 struct RootView: View {
     @EnvironmentObject private var state: AppState
 
+    var body: some View {
+        TabView {
+            FixedLocationView()
+                .tabItem { Label("定点定位", systemImage: "location.fill") }
+
+            WalkingView()
+                .tabItem { Label("模拟步行", systemImage: "figure.walk") }
+        }
+        .sheet(isPresented: $state.showSetup) {
+            SetupView(state: state)
+        }
+        .alert("发生错误", isPresented: Binding(
+            get: { state.errorMessage != nil },
+            set: { if !$0 { state.errorMessage = nil } }
+        )) {
+            Button("好", role: .cancel) { state.errorMessage = nil }
+        } message: {
+            Text(state.errorMessage ?? "")
+        }
+    }
+}
+
+struct FixedLocationView: View {
+    @EnvironmentObject private var state: AppState
+
     @State private var searchText = ""
     @State private var searchResults: [MKMapItem] = []
     @State private var searchError: String?
@@ -91,7 +116,13 @@ struct RootView: View {
                     Button("开启模拟定位", systemImage: "location.fill") {
                         execute(.set(state.selected))
                     }
-                    .disabled(isActionBusy)
+                    .disabled(isActionBusy || state.isWalkingSessionActive)
+
+                    if state.isWalkingSessionActive {
+                        Text("模拟步行进行中. 请切换到模拟步行页面暂停或结束.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("连接状态") {
@@ -118,7 +149,7 @@ struct RootView: View {
                 }
             }
             .overlay {
-                if state.isBusy {
+                if state.isBusy && !state.isWalkingSessionActive {
                     ProgressView("正在处理")
                         .padding()
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
@@ -140,9 +171,6 @@ struct RootView: View {
             state.refresh()
             reverseGeocode(state.selected)
         }
-        .sheet(isPresented: $state.showSetup) {
-            SetupView(state: state)
-        }
         .sheet(isPresented: $showingCoordinateEntry) {
             CoordinateEntryView { coordinate, name in
                 select(coordinate, name: name)
@@ -154,14 +182,6 @@ struct RootView: View {
             Button("保存") {
                 state.addFavorite(name: favoriteName.trimmingCharacters(in: .whitespacesAndNewlines))
             }
-        }
-        .alert("发生错误", isPresented: Binding(
-            get: { state.errorMessage != nil },
-            set: { if !$0 { state.errorMessage = nil } }
-        )) {
-            Button("好", role: .cancel) { state.errorMessage = nil }
-        } message: {
-            Text(state.errorMessage ?? "")
         }
     }
 
@@ -282,7 +302,7 @@ struct RootView: View {
     }
 }
 
-private struct CoordinateEntryView: View {
+struct CoordinateEntryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var latitude = ""
     @State private var longitude = ""
@@ -326,7 +346,7 @@ private struct CoordinateEntryView: View {
     }
 }
 
-private struct NativeMapView: UIViewRepresentable {
+struct NativeMapView: UIViewRepresentable {
     let selected: Coordinate
     let onSelect: (Coordinate) -> Void
 

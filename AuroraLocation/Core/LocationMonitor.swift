@@ -51,6 +51,11 @@ final class LocationMonitor: NSObject, ObservableObject, @preconcurrency CLLocat
         updateMonitoring()
     }
 
+    func moveTarget(to coordinate: Coordinate) {
+        // Walking updates the observation target without restarting Core Location every second.
+        target = coordinate
+    }
+
     func stop() {
         target = nil
         manager.stopUpdatingLocation()

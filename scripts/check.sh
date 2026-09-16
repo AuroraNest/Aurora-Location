@@ -18,4 +18,14 @@ xcrun swiftc -module-cache-path "$test_dir/cache" -I Vendor/idevice \
 xcrun swiftc -D DEBUG -module-cache-path "$test_dir/cache" \
   AuroraLocation/Core/NetworkStatus.swift Tests/NetworkProbeCheck.swift -o "$test_dir/network-check"
 "$test_dir/network-check"
+xcrun swiftc -module-cache-path "$test_dir/cache" \
+  AuroraLocation/Models/Location.swift AuroraLocation/Models/WalkingRoute.swift \
+  AuroraLocation/Core/OpenStreetMapWalkingRoute.swift \
+  Tests/WalkingRouteCheck.swift -o "$test_dir/walking-route-check"
+"$test_dir/walking-route-check"
+xcrun swiftc -module-cache-path "$test_dir/cache" \
+  AuroraLocation/Models/Location.swift AuroraLocation/Models/WalkingRoute.swift \
+  AuroraLocation/App/AppState.swift Tests/AppStateWalkingCheck.swift \
+  -o "$test_dir/walking-state-check"
+"$test_dir/walking-state-check"
 plutil -lint AuroraLocation/Resources/Info.plist AuroraLocation.xcodeproj/project.pbxproj

@@ -88,6 +88,14 @@ The first `set` starts the local responder and creates a DVT session. While that
 
 This describes implementation behavior, not device acceptance. The reconnect path for `clear` after an app restart exists but still needs physical-device verification. If a network failure prevents `clear` from completing, location state is unknown.
 
+## Simulated walking
+
+Use the separate `模拟步行` (Simulated walking) tab and choose endpoints in separate sheets. MapKit is tried first; service/no-route failures automatically use the FOSSGIS OpenStreetMap walking service. Both require network access; failures never fall back to straight lines. Preview the route, choose a speed (default 4.5 km/h, range 1...8), and start.
+
+The fallback sends selected endpoints to FOSSGIS, which logs requests. The UI includes service/privacy information, OpenStreetMap attribution and a map correction link. It uses the dedicated foot engine, at most one request per second, no bulk queries, and at most 100 m endpoint snapping. This public service has no availability guarantee; review its [usage policy](https://routing.openstreetmap.de/about.html) and consider hosting or a commercial provider before large-scale distribution.
+
+Pause holds the current point, resume continues from there, and arrival holds the endpoint until End sends clear. Fixed-location buttons and URL set cannot overwrite an active walk. Updates run approximately every second and publish progress only after a successful command. Failures or walking execution gaps longer than 8 seconds interrupt without jumping ahead; system location is then unknown. This does not resolve cellular connectivity or guarantee execution after iOS suspension.
+
 ## Shortcuts and URL Scheme
 
 In Apple Shortcuts, create a `URL` action and pass it to `Open URLs`:
@@ -126,7 +134,7 @@ auroralocation://clear
 - Physical-device tests on 2026-09-11 still failed to open a cellular-only session with a socket unexpected EOF; changing the location after switching from Wi-Fi to cellular also failed. Cellular support remains unresolved. New sessions on Wi-Fi without internet, clear after restart, and behavior in all target apps remain unverified.
 - User physical-device feedback confirms single-VPN simulated location, but the full set/change-point/clear, Apple Maps, restart, foreground/background, and cellular acceptance matrix remains incomplete.
 - The app does not download or mount DDI. If developer services fail, prepare the device again in Xcode.
-- There is no joystick, GPX, route playback, account, cloud sync, detection evasion, embedded VPN, or Simulator DVT.
+- There is no joystick, GPX, multi-waypoint editing, account, cloud sync, detection evasion, embedded VPN, or Simulator DVT.
 
 Use unchecked entries in [docs/TEST_PLAN.md](docs/TEST_PLAN.md) as the actual acceptance checklist. [docs/SHADOWROCKET.md](docs/SHADOWROCKET.md) records the single-VPN evidence and limits.
 

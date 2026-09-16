@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 import Combine
 
 @MainActor
@@ -10,6 +12,7 @@ final class AppState: ObservableObject {
     @Published var recents: [SavedPlace] = []
     @Published var isBusy = false
     @Published var isSimulating = false
+    @Published private(set) var walkingSession: WalkingSession?
     @Published var errorMessage: String?
     @Published var lastOperation = "状态未知"
     @Published var wifiAvailable = false
@@ -60,6 +63,42 @@ final class AppState: ObservableObject {
     }
 
     func execute(_ command: LocationCommand) async {
+        if case .set = command, isWalkingSessionActive {
+            errorMessage = "请先在模拟步行页面结束当前路线, 再设置固定位置."
+            return
+        }
+        await runCommand(command)
+    }
+
+    var isWalkingSessionActive: Bool {
+        isSimulating && walkingSession != nil && walkingSession?.phase != .interrupted
+    }
+
+    func startWalking(route: WalkingRoute, speedKmh: Double) async {
+        guard !isWalkingSessionActive else { report(.busy); return }
+        guard let session = WalkingSession(route: route, speedKmh: speedKmh,
+                                           startedAt: ProcessInfo.processInfo.systemUptime) else {
+            errorMessage = "步行速度须在 1...8 km/h 之间, 路线须包含有效的起点和终点."
+            return
+        }
+        await runCommand(.set(session.coordinate), startingWalk: session)
+    }
+
+    func pauseWalking() {
+        guard !isBusy, isWalkingSessionActive, walkingSession?.phase == .walking else { return }
+        walkingSession?.pause()
+        lastOperation = "步行已暂停, 保持当前位置"
+        DiagnosticLog.event("walking.paused")
+    }
+
+    func resumeWalking() {
+        guard !isBusy, !pairing.isBusy, isWalkingSessionActive, walkingSession?.phase == .paused else { return }
+        walkingSession?.resume(at: ProcessInfo.processInfo.systemUptime)
+        lastOperation = "模拟步行中"
+        DiagnosticLog.event("walking.resumed")
+    }
+
+    private func runCommand(_ command: LocationCommand, startingWalk: WalkingSession? = nil) async {
         guard !isBusy, !pairing.isBusy else { report(.busy); return }
         if case .set(let coordinate) = command, !coordinate.isValid {
             report(.invalidCoordinate)
@@ -68,7 +107,7 @@ final class AppState: ObservableObject {
         isBusy = true
         stopMaintenance()
         if case .clear = command { DiagnosticLog.begin("clear") }
-        else { DiagnosticLog.begin("set") }
+        else { DiagnosticLog.begin(startingWalk == nil ? "set" : "walking-start") }
         DiagnosticLog.event("network wifiAddress=\(NetworkStatus.hasWiFiAddress) interfaces=\(NetworkStatus.interfaceSummary)")
         errorMessage = nil
         var engineAttempted = false
@@ -82,26 +121,36 @@ final class AppState: ObservableObject {
             switch command {
             case .set(let coordinate):
                 isSimulating = true
+                // Connection setup can take seconds; walking starts only after the first set succeeds.
+                walkingSession = startingWalk.flatMap {
+                    WalkingSession(route: $0.route, speedKmh: $0.speedKmh,
+                                   startedAt: ProcessInfo.processInfo.systemUptime)
+                }
                 locationMonitor.setTarget(coordinate)
                 startMaintenance(coordinate, pairingPath: path)
                 developerStatus = "指令已完成, 会话已保留"
                 relayStatus = "中继运行中, 支持当前定位会话"
                 let name = selected == coordinate ? selectedName : coordinate.label
                 select(coordinate, name: name)
-                lastOperation = "最近操作: 已发送模拟定位指令"
+                lastOperation = startingWalk == nil ? "最近操作: 已发送模拟定位指令" : "模拟步行中"
                 var snapshot = PlacesSnapshot(favorites: favorites, recents: recents)
                 snapshot.record(SavedPlace(name: name, coordinate: coordinate))
                 savePlaces(snapshot)
             case .clear:
                 isSimulating = false
+                walkingSession = nil
                 locationMonitor.stop()
                 developerStatus = "恢复指令已完成, 会话已关闭"
                 lastOperation = "最近操作: 已发送恢复真实定位指令"
             }
+            #if canImport(UIKit)
             UINotificationFeedbackGenerator().notificationOccurred(.success)
+            #endif
         } catch {
             DiagnosticLog.event("operation.failed relay=\(await ShadowrocketTunnel.snapshot())")
             isSimulating = false
+            if let startingWalk { walkingSession = startingWalk }
+            walkingSession?.interrupt()
             locationMonitor.stop()
             await LocationEngine.disconnect()
             lastOperation = "状态未知"
@@ -164,10 +213,11 @@ final class AppState: ObservableObject {
     }
 
     private func startMaintenance(_ coordinate: Coordinate, pairingPath: String) {
-        // Refresh the applied coordinate, not the map selection. No history writes or haptics.
+        // One writer drives both modes. Map selection never changes an already applied session.
         maintenanceTask = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(4)) }
+                let interval = self?.walkingSession?.phase == .walking ? 1 : 4
+                do { try await Task.sleep(for: .seconds(interval)) }
                 catch { return }
                 guard !Task.isCancelled,
                       await self?.maintainSession(coordinate, pairingPath: pairingPath) == true else { return }
@@ -186,14 +236,41 @@ final class AppState: ObservableObject {
         guard !isBusy, !pairing.isBusy else { return true }
         isBusy = true
         defer { isBusy = false }
+        var nextStep = walkingSession
+        nextStep?.advance(to: ProcessInfo.processInfo.systemUptime)
+        if nextStep?.phase == .interrupted {
+            walkingSession = nextStep
+            stopMaintenance()
+            isSimulating = false
+            locationMonitor.stop()
+            await LocationEngine.disconnect()
+            relayStatus = await ShadowrocketTunnel.stop()
+            lastOperation = "步行更新中断, 状态未知"
+            developerStatus = "更新间隔过长, 会话已关闭"
+            errorMessage = "步行更新被暂停过久, 已停止路线以避免位置突然跳跃. 请保持 App 前台, 或开启后台位置监测后重新开始."
+            DiagnosticLog.event("walking.interrupted update-gap")
+            return false
+        }
         do {
-            try await LocationEngine.perform(.set(coordinate), pairingPath: pairingPath)
+            let appliedCoordinate = nextStep?.coordinate ?? coordinate
+            try await LocationEngine.perform(.set(appliedCoordinate), pairingPath: pairingPath)
+            if let nextStep {
+                let didArrive = walkingSession?.phase == .walking && nextStep.phase == .arrived
+                // Publish progress only after the device accepts the new coordinate.
+                walkingSession = nextStep
+                locationMonitor.moveTarget(to: appliedCoordinate)
+                if didArrive {
+                    lastOperation = "已到达终点, 持续保持定位"
+                    DiagnosticLog.event("walking.arrived")
+                }
+            }
             locationMonitor.recordDebugEvent("maintenanceSet")
             return true
         } catch {
             // ponytail: stop on disconnect; add bounded reconnect after handshake recovery is validated.
             stopMaintenance()
             isSimulating = false
+            walkingSession?.interrupt()
             locationMonitor.stop()
             lastOperation = "定位保持中断, 状态未知"
             developerStatus = "保持指令未完成 / " + (await LocationEngine.lastFailureDetails())
