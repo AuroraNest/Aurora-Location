@@ -12,6 +12,10 @@ xcrun swiftc -module-cache-path "$test_dir/cache" \
 xcrun clang -I Vendor/idevice -c Tests/EngineFFIStub.c -o "$test_dir/engine-stub.o"
 xcrun swiftc -module-cache-path "$test_dir/cache" -I Vendor/idevice \
   AuroraLocation/Models/Location.swift AuroraLocation/Core/LocationEngine.swift \
+  AuroraLocation/Core/DiagnosticLog.swift \
   Tests/EngineSessionCheck.swift "$test_dir/engine-stub.o" -o "$test_dir/engine-check"
 "$test_dir/engine-check"
+xcrun swiftc -D DEBUG -module-cache-path "$test_dir/cache" \
+  AuroraLocation/Core/NetworkStatus.swift Tests/NetworkProbeCheck.swift -o "$test_dir/network-check"
+"$test_dir/network-check"
 plutil -lint AuroraLocation/Resources/Info.plist AuroraLocation.xcodeproj/project.pbxproj

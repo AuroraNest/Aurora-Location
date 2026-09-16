@@ -24,10 +24,11 @@ enum LocationEngine {
                     if openedSession { try connect(pairingPath: pairingPath) }
                     switch command {
                     case .set(let coordinate):
-                        try checked(location_simulation_set(simulation, coordinate.latitude, coordinate.longitude),
-                            as: .locationSimulationFailed)
+                        try call("dvt.set", as: .locationSimulationFailed) {
+                            location_simulation_set(simulation, coordinate.latitude, coordinate.longitude)
+                        }
                     case .clear:
-                        try checked(location_simulation_clear(simulation), as: .clearSimulationFailed)
+                        try call("dvt.clear", as: .clearSimulationFailed) { location_simulation_clear(simulation) }
                         cleanup()
                     case nil:
                         if openedSession { cleanup() }
@@ -59,7 +60,9 @@ enum LocationEngine {
     private static func connect(pairingPath: String) throws {
         idevice_set_global_timeout(10)
         var pairing: OpaquePointer?
-        try checked(pairingPath.withCString { rp_pairing_file_read($0, &pairing) }, as: .pairingInvalid)
+        try call("pairing.read", as: .pairingInvalid) {
+            pairingPath.withCString { rp_pairing_file_read($0, &pairing) }
+        }
         guard let pairing else { throw AuroraLocationError.pairingInvalid }
         defer { rp_pairing_file_free(pairing) }
 
@@ -70,15 +73,28 @@ enum LocationEngine {
         guard NetworkStatus.tunnelIP.withCString({ inet_pton(AF_INET, $0, &address.sin_addr) }) == 1 else {
             throw AuroraLocationError.tunnelUnavailable
         }
-        let error = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                tunnel_create_rppairing($0, socklen_t(MemoryLayout<sockaddr_in>.size),
-                    "Aurora Location", pairing, nil, nil, &adapter, &handshake)
+        try call("tunnel.create-rppairing", as: .tunnelUnavailable) {
+            withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    tunnel_create_rppairing($0, socklen_t(MemoryLayout<sockaddr_in>.size),
+                        "Aurora Location", pairing, nil, nil, &adapter, &handshake)
+                }
             }
         }
-        try checked(error, as: .tunnelUnavailable)
-        try checked(remote_server_connect_rsd(adapter, handshake, &server), as: .dvtConnectionFailed)
-        try checked(location_simulation_new(server, &simulation), as: .developerImageUnavailable)
+        try call("rsd.connect", as: .dvtConnectionFailed) { remote_server_connect_rsd(adapter, handshake, &server) }
+        try call("dvt.location-service", as: .developerImageUnavailable) { location_simulation_new(server, &simulation) }
+    }
+
+    private static func call(_ stage: String, as failure: AuroraLocationError,
+                             operation: () -> UnsafeMutablePointer<IdeviceFfiError>?) throws {
+        DiagnosticLog.event("\(stage).begin")
+        do {
+            try checked(operation(), as: failure)
+            DiagnosticLog.event("\(stage).ok")
+        } catch {
+            DiagnosticLog.event("\(stage).failed \(failureDetails)")
+            throw error
+        }
     }
 
     private static func checked(_ error: UnsafeMutablePointer<IdeviceFfiError>?, as failure: AuroraLocationError) throws {

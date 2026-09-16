@@ -9,6 +9,7 @@ struct SetupView: View {
     @State private var copied = false
     @State private var configCopied = false
     @State private var exportError: String?
+    @AppStorage(DiagnosticLog.enabledKey) private var detailedDiagnostics = DiagnosticLog.defaultEnabled
 
     init(state: AppState) {
         _state = ObservedObject(wrappedValue: state)
@@ -110,6 +111,8 @@ struct SetupView: View {
                 }
 
                 Section("诊断") {
+                    Toggle("记录详细诊断", isOn: $detailedDiagnostics)
+                    ShareLink("导出诊断报告", item: state.diagnostics)
                     Text("诊断内容已脱敏, 不包含 PIN 或配对凭据.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

@@ -19,6 +19,19 @@ typedef struct AuroraEMProxyStats {
     uint64_t last_rejection;
     uint64_t tcp_resets;
     uint64_t pairing_port_resets;
+    /* Append-only diagnostics. Counters are snapshots and can be differenced by phase. */
+    uint64_t worker_ticks;
+    uint64_t udp_receive_errors;
+    uint64_t udp_send_errors;
+    /* Last recv/send raw POSIX errno. Zero means no OS error code is available. */
+    int32_t last_udp_os_error;
+    /* Authenticated, accepted inner TCP packets grouped by source port 49152 or another port. */
+    uint64_t tcp_syn_source_49152;
+    uint64_t tcp_syn_other_source;
+    uint64_t tcp_synack_source_49152;
+    uint64_t tcp_synack_other_source;
+    uint64_t tcp_rst_source_49152;
+    uint64_t tcp_rst_other_source;
 } AuroraEMProxyStats;
 
 enum {

@@ -10,6 +10,7 @@ final class LocationMonitor: NSObject, ObservableObject, @preconcurrency CLLocat
     private var target: Coordinate?
 
     func recordDebugEvent(_ event: String) {
+        DiagnosticLog.event(event)
         #if DEBUG
         let defaults = UserDefaults.standard
         var events = defaults.stringArray(forKey: "locationDebugEvents") ?? []

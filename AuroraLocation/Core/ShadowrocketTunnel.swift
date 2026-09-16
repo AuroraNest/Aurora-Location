@@ -42,4 +42,17 @@ enum ShadowrocketTunnel {
             }
         }
     }
+
+    static func snapshot() async -> String {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                var stats = AuroraEMProxyStats()
+                guard aurora_emproxy_get_stats(handle, &stats) == 0 else {
+                    continuation.resume(returning: "stopped")
+                    return
+                }
+                continuation.resume(returning: "udp=\(stats.received_udp) auth=\(stats.authenticated_ipv4) reflected=\(stats.reflected_ipv4) rejected=\(stats.rejected_packets) ticks=\(stats.worker_ticks) recvErrors=\(stats.udp_receive_errors) sendErrors=\(stats.udp_send_errors) errno=\(stats.last_udp_os_error) syn49152=\(stats.tcp_syn_source_49152) synOther=\(stats.tcp_syn_other_source) synack49152=\(stats.tcp_synack_source_49152) synackOther=\(stats.tcp_synack_other_source) rst49152=\(stats.tcp_rst_source_49152) rstOther=\(stats.tcp_rst_other_source)")
+            }
+        }
+    }
 }

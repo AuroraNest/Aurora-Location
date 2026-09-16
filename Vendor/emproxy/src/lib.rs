@@ -3,7 +3,7 @@
 use boringtun::noise::{errors::WireGuardError, Tunn, TunnResult};
 use boringtun::x25519::{PublicKey, StaticSecret};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -30,13 +30,23 @@ pub const AURORA_EMPROXY_ERROR_STOP: i32 = -8;
 
 #[derive(Default)]
 struct Counters {
+    worker_ticks: AtomicU64,
     received_udp: AtomicU64,
+    udp_receive_errors: AtomicU64,
+    udp_send_errors: AtomicU64,
+    last_udp_os_error: AtomicI32,
     authenticated_ipv4: AtomicU64,
     reflected_ipv4: AtomicU64,
     rejected_packets: AtomicU64,
     last_rejection: AtomicU64,
     tcp_resets: AtomicU64,
     pairing_port_resets: AtomicU64,
+    tcp_syn_source_49152: AtomicU64,
+    tcp_syn_other_source: AtomicU64,
+    tcp_synack_source_49152: AtomicU64,
+    tcp_synack_other_source: AtomicU64,
+    tcp_rst_source_49152: AtomicU64,
+    tcp_rst_other_source: AtomicU64,
 }
 
 #[repr(C)]
@@ -48,6 +58,16 @@ pub struct AuroraEMProxyStats {
     pub last_rejection: u64,
     pub tcp_resets: u64,
     pub pairing_port_resets: u64,
+    pub worker_ticks: u64,
+    pub udp_receive_errors: u64,
+    pub udp_send_errors: u64,
+    pub last_udp_os_error: i32,
+    pub tcp_syn_source_49152: u64,
+    pub tcp_syn_other_source: u64,
+    pub tcp_synack_source_49152: u64,
+    pub tcp_synack_other_source: u64,
+    pub tcp_rst_source_49152: u64,
+    pub tcp_rst_other_source: u64,
 }
 
 struct Worker {
@@ -134,6 +154,7 @@ fn run_proxy(
     let mut next_timer = Instant::now() + TIMER_INTERVAL;
 
     loop {
+        counters.worker_ticks.fetch_add(1, Ordering::Relaxed);
         match stop_receiver.try_recv() {
             Ok(()) | Err(TryRecvError::Disconnected) => break,
             Err(TryRecvError::Empty) => {}
@@ -165,7 +186,10 @@ fn run_proxy(
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(_) => break,
+                Err(error) => {
+                    record_udp_receive_error(&counters, &error);
+                    break;
+                }
             }
         }
 
@@ -173,7 +197,7 @@ fn run_proxy(
         if now >= next_timer {
             if let Some(endpoint) = peer_endpoint {
                 if let TunnResult::WriteToNetwork(packet) = tunnel.update_timers(&mut encrypted) {
-                    let _ = socket.send_to(packet, endpoint);
+                    let _ = send_packet(&socket, packet, endpoint, &counters);
                 }
             }
             next_timer = now + TIMER_INTERVAL;
@@ -182,6 +206,26 @@ fn run_proxy(
         match stop_receiver.recv_timeout(POLL_INTERVAL) {
             Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+fn record_udp_receive_error(counters: &Counters, error: &std::io::Error) {
+    counters.udp_receive_errors.fetch_add(1, Ordering::Relaxed);
+    counters
+        .last_udp_os_error
+        .store(error.raw_os_error().unwrap_or(0), Ordering::Relaxed);
+}
+
+fn send_packet(socket: &UdpSocket, packet: &[u8], endpoint: SocketAddr, counters: &Counters) -> bool {
+    match socket.send_to(packet, endpoint) {
+        Ok(_) => true,
+        Err(error) => {
+            counters.udp_send_errors.fetch_add(1, Ordering::Relaxed);
+            counters
+                .last_udp_os_error
+                .store(error.raw_os_error().unwrap_or(0), Ordering::Relaxed);
+            false
         }
     }
 }
@@ -211,7 +255,7 @@ fn process_datagram(
                         if let TunnResult::WriteToNetwork(packet) =
                             tunnel.format_handshake_initiation(encrypted, false)
                         {
-                            let _ = socket.send_to(packet, endpoint);
+                            let _ = send_packet(socket, packet, endpoint, counters);
                         }
                         2
                     }
@@ -222,24 +266,16 @@ fn process_datagram(
                 return authenticated;
             }
             TunnResult::WriteToNetwork(packet) => {
-                let _ = socket.send_to(packet, endpoint);
+                let _ = send_packet(socket, packet, endpoint, counters);
             }
             TunnResult::WriteToTunnelV4(packet, _) => {
                 authenticated = true;
                 counters.authenticated_ipv4.fetch_add(1, Ordering::Relaxed);
-                if remap_pairing_packet(packet) {
-                    let tcp_flags = packet[usize::from(packet[0] & 0x0f) * 4 + 13];
-                    if tcp_flags & 0x04 != 0 {
-                        counters.tcp_resets.fetch_add(1, Ordering::Relaxed);
-                        let offset = usize::from(packet[0] & 0x0f) * 4;
-                        if u16::from_be_bytes([packet[offset], packet[offset + 1]]) == PAIRING_PORT {
-                            counters.pairing_port_resets.fetch_add(1, Ordering::Relaxed);
-                        }
-                    }
+                if remap_pairing_packet_with_diagnostics(packet, counters) {
                     if let TunnResult::WriteToNetwork(packet) =
                         tunnel.encapsulate(packet, encrypted)
                     {
-                        if socket.send_to(packet, endpoint).is_ok() {
+                        if send_packet(socket, packet, endpoint, counters) {
                             counters.reflected_ipv4.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -258,7 +294,54 @@ fn process_datagram(
     }
 }
 
+fn record_inner_tcp_flags(packet: &[u8], counters: &Counters) {
+    let offset = usize::from(packet[0] & 0x0f) * 4;
+    let source_is_pairing_port =
+        u16::from_be_bytes([packet[offset], packet[offset + 1]]) == PAIRING_PORT;
+    let flags = packet[offset + 13];
+
+    if flags & 0x12 == 0x02 {
+        increment_source_counter(
+            source_is_pairing_port,
+            &counters.tcp_syn_source_49152,
+            &counters.tcp_syn_other_source,
+        );
+    }
+    if flags & 0x12 == 0x12 {
+        increment_source_counter(
+            source_is_pairing_port,
+            &counters.tcp_synack_source_49152,
+            &counters.tcp_synack_other_source,
+        );
+    }
+    if flags & 0x04 != 0 {
+        counters.tcp_resets.fetch_add(1, Ordering::Relaxed);
+        increment_source_counter(
+            source_is_pairing_port,
+            &counters.tcp_rst_source_49152,
+            &counters.tcp_rst_other_source,
+        );
+        if source_is_pairing_port {
+            counters.pairing_port_resets.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+fn increment_source_counter(pairing_source: bool, pairing: &AtomicU64, other: &AtomicU64) {
+    let counter = if pairing_source { pairing } else { other };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(test)]
 fn remap_pairing_packet(packet: &mut [u8]) -> bool {
+    remap_pairing_packet_impl(packet, None)
+}
+
+fn remap_pairing_packet_with_diagnostics(packet: &mut [u8], counters: &Counters) -> bool {
+    remap_pairing_packet_impl(packet, Some(counters))
+}
+
+fn remap_pairing_packet_impl(packet: &mut [u8], counters: Option<&Counters>) -> bool {
     if packet.len() < 40 || packet[0] >> 4 != 4 {
         return false;
     }
@@ -299,6 +382,10 @@ fn remap_pairing_packet(packet: &mut [u8]) -> bool {
 
     if tcp_checksum(packet, header_length, total_length) != 0xffff {
         return false;
+    }
+
+    if let Some(counters) = counters {
+        record_inner_tcp_flags(packet, counters);
     }
 
     for offset in 0..4 {
@@ -396,8 +483,12 @@ pub unsafe extern "C" fn aurora_emproxy_get_stats(
         return AURORA_EMPROXY_ERROR_NULL_ARGUMENT;
     }
 
-    let counters = &(*handle).worker.counters;
-    *out_stats = AuroraEMProxyStats {
+    *out_stats = snapshot_stats(&(*handle).worker.counters);
+    AURORA_EMPROXY_OK
+}
+
+fn snapshot_stats(counters: &Counters) -> AuroraEMProxyStats {
+    AuroraEMProxyStats {
         received_udp: counters.received_udp.load(Ordering::Relaxed),
         authenticated_ipv4: counters.authenticated_ipv4.load(Ordering::Relaxed),
         reflected_ipv4: counters.reflected_ipv4.load(Ordering::Relaxed),
@@ -405,8 +496,17 @@ pub unsafe extern "C" fn aurora_emproxy_get_stats(
         last_rejection: counters.last_rejection.load(Ordering::Relaxed),
         tcp_resets: counters.tcp_resets.load(Ordering::Relaxed),
         pairing_port_resets: counters.pairing_port_resets.load(Ordering::Relaxed),
-    };
-    AURORA_EMPROXY_OK
+        worker_ticks: counters.worker_ticks.load(Ordering::Relaxed),
+        udp_receive_errors: counters.udp_receive_errors.load(Ordering::Relaxed),
+        udp_send_errors: counters.udp_send_errors.load(Ordering::Relaxed),
+        last_udp_os_error: counters.last_udp_os_error.load(Ordering::Relaxed),
+        tcp_syn_source_49152: counters.tcp_syn_source_49152.load(Ordering::Relaxed),
+        tcp_syn_other_source: counters.tcp_syn_other_source.load(Ordering::Relaxed),
+        tcp_synack_source_49152: counters.tcp_synack_source_49152.load(Ordering::Relaxed),
+        tcp_synack_other_source: counters.tcp_synack_other_source.load(Ordering::Relaxed),
+        tcp_rst_source_49152: counters.tcp_rst_source_49152.load(Ordering::Relaxed),
+        tcp_rst_other_source: counters.tcp_rst_other_source.load(Ordering::Relaxed),
+    }
 }
 
 #[no_mangle]
@@ -568,6 +668,33 @@ mod tests {
         assert!(!remap_pairing_packet(&mut fragmented));
 
         assert!(!remap_pairing_packet(&mut [0_u8; 12]));
+    }
+
+    #[test]
+    fn tcp_flag_snapshot_groups_sources_without_packet_data() {
+        let counters = Counters::default();
+        let mut client_syn = test_packet(52_000, PAIRING_PORT);
+        client_syn[33] = 0x02;
+        let mut pairing_synack = test_packet(PAIRING_PORT, 52_000);
+        pairing_synack[33] = 0x12;
+        let mut pairing_reset = test_packet(PAIRING_PORT, 52_000);
+        pairing_reset[33] = 0x14;
+
+        record_inner_tcp_flags(&client_syn, &counters);
+        record_inner_tcp_flags(&pairing_synack, &counters);
+        record_inner_tcp_flags(&pairing_reset, &counters);
+
+        let snapshot = snapshot_stats(&counters);
+        assert_eq!(snapshot.tcp_syn_source_49152, 0);
+        assert_eq!(snapshot.tcp_syn_other_source, 1);
+        assert_eq!(snapshot.tcp_synack_source_49152, 1);
+        assert_eq!(snapshot.tcp_synack_other_source, 0);
+        assert_eq!(snapshot.tcp_rst_source_49152, 1);
+        assert_eq!(snapshot.tcp_rst_other_source, 0);
+        assert_eq!(snapshot.pairing_port_resets, 1);
+        assert_eq!(snapshot.last_udp_os_error, 0);
+        assert_eq!(std::mem::size_of::<AuroraEMProxyStats>(), 136);
+        assert!(!std::mem::needs_drop::<AuroraEMProxyStats>());
     }
 
     #[test]

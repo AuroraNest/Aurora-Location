@@ -15,7 +15,9 @@ final class AppState: ObservableObject {
     @Published var wifiAvailable = false
     @Published var tunnelStatus = "尚未检测"
     @Published var developerStatus = "尚未检测"
-    @Published var relayStatus = "尚未运行"
+    @Published var relayStatus = "尚未运行" {
+        didSet { locationMonitor.recordDebugEvent("relay=\(relayStatus)") }
+    }
     @Published var showSetup = false
     let pairing = PairingService()
     let locationMonitor = LocationMonitor()
@@ -65,6 +67,9 @@ final class AppState: ObservableObject {
         }
         isBusy = true
         stopMaintenance()
+        if case .clear = command { DiagnosticLog.begin("clear") }
+        else { DiagnosticLog.begin("set") }
+        DiagnosticLog.event("network wifiAddress=\(NetworkStatus.hasWiFiAddress) interfaces=\(NetworkStatus.interfaceSummary)")
         errorMessage = nil
         var engineAttempted = false
         do {
@@ -72,6 +77,7 @@ final class AppState: ObservableObject {
             let path = try PairingStore.fileURL().path
             engineAttempted = true
             try await LocationEngine.perform(command, pairingPath: path)
+            DiagnosticLog.event("native.ok relay=\(await ShadowrocketTunnel.snapshot())")
             lastErrorCode = "none"
             switch command {
             case .set(let coordinate):
@@ -94,6 +100,7 @@ final class AppState: ObservableObject {
             }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch {
+            DiagnosticLog.event("operation.failed relay=\(await ShadowrocketTunnel.snapshot())")
             isSimulating = false
             locationMonitor.stop()
             await LocationEngine.disconnect()
@@ -103,6 +110,7 @@ final class AppState: ObservableObject {
             report(error as? AuroraLocationError ?? .pairingInvalid)
         }
         if !isSimulating { relayStatus = await ShadowrocketTunnel.stop() }
+        DiagnosticLog.event("end simulating=\(isSimulating)")
         isBusy = false
     }
 
@@ -113,20 +121,25 @@ final class AppState: ObservableObject {
             return
         }
         isBusy = true
+        DiagnosticLog.begin("check")
+        DiagnosticLog.event("network wifiAddress=\(NetworkStatus.hasWiFiAddress) interfaces=\(NetworkStatus.interfaceSummary)")
         errorMessage = nil
         var engineAttempted = false
         do {
             try await prepareConnection()
             engineAttempted = true
             try await LocationEngine.perform(nil, pairingPath: PairingStore.fileURL().path)
+            DiagnosticLog.event("native.ok relay=\(await ShadowrocketTunnel.snapshot())")
             developerStatus = "检测成功, 会话已关闭"
             lastErrorCode = "none"
         } catch {
+            DiagnosticLog.event("native.failure relay=\(await ShadowrocketTunnel.snapshot())")
             developerStatus = "检测未完成"
             if engineAttempted { developerStatus += " / " + (await LocationEngine.lastFailureDetails()) }
             report(error as? AuroraLocationError ?? .pairingInvalid)
         }
         relayStatus = await ShadowrocketTunnel.stop()
+        DiagnosticLog.event("end check")
         isBusy = false
     }
 
@@ -141,10 +154,13 @@ final class AppState: ObservableObject {
             return
         }
         tunnelStatus = "正在检测"
-        let reachable = await NetworkStatus.probeTunnel()
-        tunnelStatus = reachable ? "本机端口可达" : "本机端口不可达"
-        guard reachable else { throw AuroraLocationError.tunnelUnavailable }
+        DiagnosticLog.event("precheck.begin relay=\(await ShadowrocketTunnel.snapshot())")
+        let probe = await NetworkStatus.probeTunnel()
+        DiagnosticLog.event("precheck.end \(probe.details) relay=\(await ShadowrocketTunnel.snapshot())")
+        tunnelStatus = (probe.reachable ? "本机端口可达" : "本机端口不可达") + " / " + probe.details
+        guard probe.reachable else { throw AuroraLocationError.tunnelUnavailable }
         developerStatus = "正在连接"
+        DiagnosticLog.event("native.begin relay=\(await ShadowrocketTunnel.snapshot())")
     }
 
     private func startMaintenance(_ coordinate: Coordinate, pairingPath: String) {
@@ -217,10 +233,37 @@ final class AppState: ObservableObject {
         developerService: \(developerStatus)
         relay: \(relayStatus)
         errorCode: \(lastErrorCode)
+        Detailed trace (bounded to 500 events):
+        \(DiagnosticLog.report())
         """
     }
 
     func handleURL(_ url: URL) {
+        #if DEBUG
+        if url.scheme == "auroralocation", ["probe-proxy", "probe-loopback", "probe-loopback-restricted", "probe-peer-loopback"].contains(url.host), url.path.isEmpty,
+           url.query == nil, url.fragment == nil, url.user == nil, url.password == nil, url.port == nil {
+            Task {
+                guard !isBusy, !pairing.isBusy, !isSimulating else { return }
+                isBusy = true
+                defer { isBusy = false }
+                let peer = url.host == "probe-peer-loopback"
+                let restricted = url.host == "probe-loopback-restricted"
+                let loopback = url.host == "probe-loopback" || restricted || peer
+                DiagnosticLog.begin(peer ? "peer-loopback-probe" : restricted ? "restricted-loopback-probe" : loopback ? "loopback-probe" : "proxy-probe")
+                do {
+                    try await ShadowrocketTunnel.start()
+                    relayStatus = "代理诊断中继已启动"
+                    let probe = loopback ? await NetworkStatus.probeLoopback(restrictListener: restricted, peerToPeer: peer) : await NetworkStatus.probeTunnel(viaLocalProxy: true)
+                    DiagnosticLog.event("proxy.end wifiAddress=\(NetworkStatus.hasWiFiAddress) \(probe.details) relay=\(await ShadowrocketTunnel.snapshot())")
+                    locationMonitor.recordDebugEvent("proxyProbe wifi=\(NetworkStatus.hasWiFiAddress) \(probe.details)")
+                } catch {
+                    locationMonitor.recordDebugEvent("proxyProbe relay-start-failed")
+                }
+                relayStatus = await ShadowrocketTunnel.stop()
+            }
+            return
+        }
+        #endif
         do {
             let command = try LocationCommand(url: url)
             Task { await execute(command) }
@@ -247,7 +290,8 @@ final class AppState: ObservableObject {
     }
 
     private func report(_ error: AuroraLocationError) {
-        locationMonitor.recordDebugEvent("error=\(error.rawValue) wifi=\(NetworkStatus.hasWiFiAddress) detail=\(developerStatus)")
+        DiagnosticLog.event("error=\(error.rawValue) detail=\(developerStatus)")
+        locationMonitor.recordDebugEvent("error=\(error.rawValue) wifi=\(NetworkStatus.hasWiFiAddress) probe=\(tunnelStatus) detail=\(developerStatus)")
         lastErrorCode = error.rawValue
         errorMessage = error.localizedDescription
     }

@@ -13,6 +13,12 @@ enum NetworkStatus {
 @main
 struct EngineSessionCheck {
     static func main() async throws {
+        UserDefaults.standard.set(true, forKey: DiagnosticLog.enabledKey)
+        defer {
+            UserDefaults.standard.removeObject(forKey: DiagnosticLog.enabledKey)
+            UserDefaults.standard.removeObject(forKey: DiagnosticLog.eventsKey)
+        }
+        DiagnosticLog.begin("session-check")
         let path = "/test/pairing"
         try await LocationEngine.perform(.set(.timesSquare), pairingPath: path)
         assert(count(0) == 1 && count(1) == 1 && count(3) == 0)
@@ -53,6 +59,15 @@ struct EngineSessionCheck {
         let refused = await LocationEngine.lastFailureDetails()
         assert(refused.contains("stage pairing-tcp") && refused.contains("连接被拒绝"))
         assert(!refused.contains("PRIVATE_PEER_DATA"))
+        let trace = DiagnosticLog.report()
+        assert(trace.contains("tunnel.create-rppairing.ok") && trace.contains("dvt.set.failed"))
+        assert(!trace.contains("PRIVATE_PEER_DATA") && !trace.contains(path))
+        UserDefaults.standard.set(false, forKey: DiagnosticLog.enabledKey)
+        DiagnosticLog.event("disabled-event")
+        assert(DiagnosticLog.report() == trace)
+        UserDefaults.standard.set(true, forKey: DiagnosticLog.enabledKey)
+        for _ in 0..<501 { DiagnosticLog.event("bounded-event") }
+        assert(DiagnosticLog.report().split(separator: "\n").count == 500)
         print("PASS: set retains session, next set reuses it, check preserves it, clear/failure clean up, retry reconnects; no Wi-Fi gate")
     }
 }
