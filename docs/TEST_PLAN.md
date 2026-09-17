@@ -1,5 +1,87 @@
 # 测试与真机验收
 
+## 2026-09-17 15:24-15:28 定位与 IKEv2 App 合并
+
+- 用户要求先合并两个 App. 原主 App 标识再次被 Apple 返回不可注册, 通配符 profile 缺少 Personal VPN 权限. 改为沿用已有 IKEv2Lab 标识升级完整 App, 保留原 VPN 配置和 Keychain 身份, 显示名称为 Aurora Location.
+- 删除 PERSONAL_VPN_LAB 入口分支及独立实验包构建脚本. 定点/步行标签不变, 设置内保留独立 IKEv2 页面, 可在同一 App 检测开发者连接.
+- 原主 App 的 Pairing、Places、Tunnel 文件经本机私有临时目录迁移, 回读三份文件与原文件逐字节一致. 只迁移后台监测和诊断开关这两个偏好, 不输出配对/密钥内容, 不导出或重填 VPN 密码. 原主 App 保留回退, 未卸载.
+- 签名 Debug build、codesign --verify --deep --strict、原实验包覆盖安装通过. sh scripts/check.sh 初次被沙箱禁止回环 listener, 在允许本地网络环境重跑后全部通过. git diff --check 通过.
+- 真机合并版: 配对已保存, Wi-Fi 开发者检测成功并关闭会话; 本机中继 UDP142/解密141/回送141/拒绝0. IKEv2 页保留原服务器及已保存密码引用, 状态已断开, 内嵌开发者检测入口可见. 模拟步行独立标签正常打开.
+- 自动审批要求对合并版始终定位单独授权. 用户明确允许后完成系统授权, 页面显示已获权限. 未发送 set/clear, 本轮未重新连接 IKEv2 或验证蜂窝; 合并不代表蜂窝链路问题解决.
+- 原主 App 与合并版暂时都注册 auroralocation, 实际定位验收前请直接使用当前打开的合并版, 不依赖 URL 打开目标. 用户验收后再移除旧 App. 未提交推送.
+
+## 2026-09-17 14:35-15:00 新入口与剩余阻塞
+
+- 用户明确授权自主执行 txy 中转实验. 首轮 Mac 探针两端口超时, txy 抓包和规则计数均为零. 腾讯云控制台确认该实例原有 16 条规则未放行 UDP500/4500. 仅新增带 `aurora-ike-trial-20260917` 标记的双端口规则后, Mac 绑定 en0 的初始协商 500/4500 均收到匹配响应, 171/230ms.
+- 中转路径: 手机 -> txy UDP500/4500 -> bwg UDP500/14500 -> 既有 strongSwan4500. bwg 高位映射仅允许 txy /32 来源, 两端均为有时限的运行时规则, 不复制证书、密码或配对文件.
+- 实验 App 仅将 serverAddress 改为 txy IPv4, 保留 Remote ID 和已存凭据. SR 暂停后, 手机显示已连接, bwg 记录 EAP_MSCHAPV2 成功及 IKE_SA70/CHILD10. Wi-Fi 下 ping2/2, 服务器绑定10.203.0.1到手机10.203.0.2:49152的无数据 TCP connect 返回0.
+- 执行关闭 Wi-Fi 后, 同一 IKE70 经 MOBIKE 更新端点, ping2/2仍成功, 49152返回ECONNREFUSED111. 镜像随之断开, 本轮未取得切换后的独立5G截图或手机日志. 用户恢复Wi-Fi后, 同一IKE无需重建, ping2/2和49152连接立即恢复. 这是网络条件相关的端口接入差异, 尚不能单凭TCP结果区分监听取消与系统拒收.
+- Wi-Fi下恢复SR Aurora-Auto后, IKE仍ESTABLISHED, ping2/2丢失、49152超时; 只停SR即恢复ping. 临时TUN旁路10.203.0.1/32, 保存及重连均无效, 已删除. 实验App增加 `enforceRoutes=true` 后新IKE74/CHILD11单独可通、开启SR仍失败; 再单独旁路外层txy/32并重连也无效. 这些结果不等于纯蜂窝完整定位成功.
+- 两条SR旁路均恢复为空, `enforceRoutes` 已从源码撤回. 恢复实验包签名构建及系统环境 `codesign --verify --deep --strict` 通过, 覆盖安装后写回原bwg入口和默认参数, IKE已断开. txy带标记iptables规则、bwg14500映射均已清理; 云防火墙已恢复原16条规则, 服务端失联IKE74已精确终止, nginx/strongSwan/xray/caddy保持active. 无set/clear或凭据变更.
+- 15:00最终恢复验证: 原Aurora Location在Wi-Fi + SR下重新检测, 设置页明确显示开发者服务检测成功、会话已关闭; 中继UDP149/解密148/回送148/拒绝0/TCP复位1/49152发出0. 配对仍有效. 这只验证连接, 不外推为本轮位置或后台验收.
+- 后续应聚焦两个独立问题: SR开启时IPsec数据包在手机上的处理, 以及切换Wi-Fi后既有加密开发者会话能否保留. 原始TCP曾在Wi-Fi单IKE下保持180秒, 没有完成该连接的网络切换对照, 不能写成蜂窝保持通过. 不重复无新机制的分片、DIRECT/PROXY、上述旁路或重新配对.
+
+## 2026-09-17 独立出口和高位端口对照
+
+- NY mini直连与经bwg跳板的SSH均超时, rly SSH关闭连接, 没有修改两台主机. 从既有txy执行同一无凭据IKE_SA_INIT探针, 500收到457字节/137ms匹配回应, 4500两次4秒超时; bwg确认均收到并回应. 这排除了仅手机或仅当前Wi-Fi设备的问题, 不能定位具体丢包网络节点.
+- bwg临时添加仅允许txy来源、120秒自动失效的UDP14500到既有4500的运行时映射. txy的14500初始协商收到461字节/136ms匹配回应. 测试后明确删除映射成功, 无持久防火墙修改. 换端口可以通过当前路径, 但不代表完成EAP或VPN认证.
+- 当时准备txy临时UDP500/4500入口转发到bwg500/14500, 不复制凭据或证书. 入口脚本只作用于本机目的流量和固定bwg目标, 定时退出清理; mock验证正常到期及中途安装失败都会执行带唯一标记规则的清理. 用户随后已授权并执行, 结果及回退见上方14:35-15:00记录.
+
+## 2026-09-17 13:49 手机 PROXY 规则对照未通过
+
+- 用户授权交回手机. 将唯一 `67.230.174.234/32` 规则从 DIRECT 临时改为 PROXY, 保留 no-resolve; Aurora-Auto/配置模式不变. 首次及停止IKE、重连SR后再次尝试均未完成EAP认证. 服务端出现代理来源的初始请求, 但认证请求仍出现直连路径, 无ESTABLISHED会话.
+- 真机 Console 13:48:29 的 NEIKEv2Provider C7明确记录4500路径为 `interface: en0[802.11], scoped`, 输出协议UDP-NAT-T. 13:48:33内核汇总: 同一源端口到500收521/发432字节, 到4500收0/发1116字节(0/3包). 说明本次4500实际仍走限定的Wi-Fi接口, 不能把Mac普通socket经代理成功外推到iOS系统IKE.
+- 已停止IKE与Console采集, 精确规则已恢复DIRECT/no-resolve, 小火箭保持Aurora-Auto. 未改变Wi-Fi/蜂窝、账号、配对或定位. 本轮无App代码修改. 下一步应优先验证其他直连出口或不同服务器路径, 而非继续重复该PROXY规则实验; 蜂窝开发者入口限制仍未解决.
+
+## 2026-09-17 UDP4500 路径对照, 未操作手机
+
+- 用户提供 11:03-11:04 真机 RVI 文本: UDP500 请求432/响应521字节, 切换4500后只看到372字节请求重传, 没有入站回应. 同轮 bwg eth0 抓包显示收到请求并发送1240/1240/1240/120字节响应. 两端结合定位为该路径响应未到达手机RVI观察点, 尚不能指定是哪一跳丢弃.
+- bwg IPv4出口未发现阻断规则, rp_filter=0, 无eth0全局IPv6地址及IPv6默认路由. 未修改防火墙或代理服务.
+- Mac 最小无凭据 IKE_SA_INIT 探针: socket绑定en0, UDP500收到457字节匹配回应, UDP4500两次4秒超时; strongSwan确认收到并回应两端口. 沿已有系统路由(utun9)发送时, UDP500收到457字节/1032ms, UDP4500收到461字节/668ms, SPI及源端点匹配. 再次绑定en0复核, 500成功/4500两次超时. 这是初始协商, 不是EAP认证或VPN成功.
+- 服务端脱敏来源分组确认: 直连与系统路由来源不同, 后者来源为bwg自身, 与代理转发路径一致. 支持下一步临时停用手机精确DIRECT规则做传输路径对照, 不能推断小火箭与IKE的数据面或开发者入口已修复.
+- 未操作手机, 等待用户交回设备. 临时可复现探针保留在Mac `/tmp/aurora-ike-init-probe.py`, 只发初始协商, 无凭据/配对/业务数据. 服务器tcpdump已安装但无常驻采集, RVI已关闭.
+
+## 2026-09-17 10:46 Wi-Fi 基线与 IKE 认证响应故障
+
+- Wi-Fi 已连接且 Shadowrocket 关闭时, IKEv2 仍停在 IKE_AUTH. 服务端反复重传约 3600 字节认证响应, 未完成 EAP. 真机 Console 10:44:45 明确记录 `Failed to receive IKE Auth packet (connect)` 和 `NEIKEv2ErrorDomain Code=3 PeerDidNotRespond`. 该结果不等同于证书校验失败或开发者端口失败.
+- 按 strongSwan 官方 `charon.fragment_size` 参数做一次 576 字节对照, 日志确认从 4 片变为 8 片, 仍重传失败. 已删除独立临时分片配置并重载, 恢复原值. 未更改证书校验、代理服务、节点或路由.
+- 已恢复 Wi-Fi + Shadowrocket Aurora-Auto/配置模式. Aurora Location 点击重新检测成功, 页面显示开发者服务检测成功且会话已关闭; 中继 UDP139/解密138/回送138/拒绝0, TCP复位2且49152发出0. 未执行 set/clear 定位.
+- 实验 IKEv2 已断开, 服务端无活动会话, Console 已停止采集. Wi-Fi IKEv2 尚未建立, 因此本轮未完成 VPN 地址49152的 Wi-Fi/蜂窝对照. 下一步先定位 IKE_AUTH 回程丢失或客户端处理原因, 不新增未经验证的 App 转发代码.
+
+## 2026-09-16 Personal VPN 共存实验
+
+- 新增原生 IKEv2 管理页, 使用 EAP 用户名/密码和 Keychain persistent reference, 不添加 Packet Tunnel extension, 不自动连接.
+- `sh scripts/check.sh` 通过, 包括 URL/存储/会话/真实本机监听/步行回归及新增 IKEv2 地址与必填身份检查. 这些检查不验证系统 VPN 的凭据消费或真实握手.
+- 正常 Aurora Location 的无签名 iOS 构建通过. 原 Bundle ID 无法在当前签名团队注册 Personal VPN 能力, 现有通配符 profile 不具备该权限; 未替换已安装原 App 的标识.
+- 独立实验 Bundle ID 获得带 `allow-vpn` 的 provisioning profile, 签名构建和 `codesign --verify --deep --strict` 通过. `Aurora 连接实验` 已安装到原 iPhone; 它只显示 IKEv2 页, 不注册原 `auroralocation` URL Scheme, 原定位 App 的配对数据不迁移.
+- 用户确认后, bwg 已从 EPEL 安装 strongSwan 6.0.6, 独立配置 aurora-lab 加载成功, UDP 500/4500 已运行时及永久放行. Xray, canary, Caddy, Hysteria2 均保持 active. 这不等于 iPhone 已成功握手.
+- 实验服务只发布 10.203.0.1/32, 地址池 10.203.0.2-10.203.0.5, 不发布默认路由或 DNS, 不新增 NAT. 使用现有 wloc 公开证书, 完整中间链经系统 CA 验证通过; 证书副本有效至 2026-10-20, 长期保留前需接入续期. 不新增手机根证书或跳过服务器身份验证. 配置依照 [strongSwan iOS 互通要求](https://docs.strongswan.org/docs/latest/interop/ios.html).
+- 服务端配置: /etc/strongswan/swanctl/conf.d/aurora-lab.conf; 独立 loopback 地址随 strongswan systemd 生命周期添加和移除. 凭据仅在服务端受保护文件及本机临时接入文件, 不入 Git. 回退先 systemctl disable --now strongswan, 再仅移除 public zone 的 UDP 500/4500 运行时和永久端口; 不 reload 防火墙或重启现有代理. 部署前备份位于 bwg:/root/aurora-ikev2-backup.
+- 实机首次读取发现系统在无 protocol 的状态下仍提供默认 description. 已据 `protocol=nil, enabled=false, status=.invalid` 修复首次识别并增加回归, 临时状态采集代码已移除.
+- [x] 实机初始页显示未配置, 点击空表单的保存并连接会显示地址校验错误, 未弹出添加 VPN 或启动连接. 最终包中未配置时点击断开和移除均无操作. 完整有效输入/连接操作仍待服务端.
+- [ ] 用户授权系统创建配置, 正确凭据连接成功, 重启 App 后凭据仍可用; 错误身份和错误密码失败.
+- [ ] 改密码保存失败保留旧有效配置, 断开和移除仅作用于本 App 的 VPN, 移除后 Keychain 凭据清理.
+- [ ] 纯蜂窝下 IKEv2 和 Shadowrocket 同时连接, 既有外网与分流正常.
+- [ ] 受限 listener 回包, RPPairing/RSD/DVT 真实握手及 set/clear 成功.
+- [ ] 后台/锁屏持续保持和模拟步行分别验收; VPN connected 或普通 echo 不作为定位成功证据.
+
+### 2026-09-17 IKEv2 连接中排查
+
+- 用户已完成凭据保存和系统授权. 域名入口的手机重试收到服务端 IKE_SA_INIT 回应, 未进入 IKE_AUTH 后超时; 该请求源地址为 bwg 本身, 提示代理转发路径, 尚不能确认唯一原因.
+- 只将实验 App 服务器地址改为 bwg IPv4, Remote ID 和已存凭据保持不变. 00:00:53 服务端记录一次 EAP_MSCHAPV2 成功, IKE_SA 和 CHILD_SA 建立, 随即收到客户端 DELETE; 同时新会话又来自 bwg 本身并停在初始握手. 不能将瞬时建立算稳定连接.
+- 用户明确授权后, 已在 shadowrocket.conf 顶部添加临时 `IP-CIDR,67.230.174.234/32,DIRECT,no-resolve` 规则, 其余规则与节点不变. 00:09 重试仍在 EAP/IKE/CHILD 建立后被客户端 DELETE. 手机 Wi-Fi/蜂窝未切换.
+- 00:18:55 真机 Console 的 nesessionmanager 明确记录 `Request to install personal session ... delayed due to exclusive enterprise session (...Shadowrocket...)`, 随后 `config request: failed to request install`. NEIKEv2Provider 报 `setTunnelNetworkSettings (Set) failed (en0): NEAgentErrorDomain Code=1`, 以 IKEv2ProviderDisconnectionErrorDomain 31 结束. 此次直接失败点是 iOS 拒绝在当前 Shadowrocket 独占会话旁安装 Personal VPN 网络配置, 不能只归因于密码/证书/端口.
+- 小火箭设置中强制路由和包括所有网络均原已关闭, 只读检查未修改. DIRECT 规则仍保留, 可通过删除该精确规则回退. 未验证改变 TUN 路由是否解除独占, 不据此宣称所有共存方案不可能.
+- App 增加原生 fetchLastDisconnectError 诊断入口, 仅显示固定错误分类与编号, 不输出 userInfo. focused Swift 检查, 签名构建, codesign 和安装通过. 本次真机 API 返回 nil, 页面如实显示系统未提供原因; 上述具体原因来自 Console, 不是该 API.
+- 已停止 Console 流式采集并恢复 Info 选项. 实验页显示已断开, 无定位操作. 服务端无 tcpdump, 本轮无抓包证据; 蜂窝共存与真实 DVT 定位仍未通过.
+
+### 2026-09-17 10:12 IKEv2 数据面与开发者入口对照
+
+- 用户先连接 IKEv2 再开启 Shadowrocket 后, 系统两项均显示连接, 蜂窝 5G/Wi-Fi 未连接. 10:09 App check 为 UDP 3/auth 2/reflected 2/rejected 0, 收到源端口 49152 的 RST, RPPairing 提前关闭. 不能将双 VPN 状态等同于数据面或定位成功.
+- bwg 同一 IKE_SA #37/CHILD #9, 在线租约 10.203.0.2, 只允许服务器 10.203.0.1/32. 服务器绑定 10.203.0.1 向手机 49152 做一次 5 秒 TCP connect, 不发送应用数据: 双 VPN 时超时, ESP out 增加 3 包/in 0; ping 2/2 丢失.
+- 只暂时关闭 Shadowrocket, 不重连 IKEv2: ping 2/2 成功, 延迟约 217-260ms; 同一 TCP connect 明确返回 ECONNREFUSED(111), ESP in 增加 3 包. 恢复 Shadowrocket 后同一会话仍 ESTABLISHED, ping 再次 2/2 丢失. 已恢复原 Aurora-Auto/配置连接, 未改变节点或路由.
+- 结论: 当前双 VPN 有可复现的数据面冲突; 单独 IKEv2 在蜂窝下数据面可通, 但手机 VPN 地址的 49152 不接受连接. 不能只靠将现有 App 流量改走 IKEv2 宣称可修复. TCP refusal 不能单独区分未监听和系统拒绝, 不宣称所有方案不可能. 没有新增服务/开放端口/传输配对凭据/执行定位.
+
 ## 2026-09-16 模拟步行
 
 自动规划修复证据:

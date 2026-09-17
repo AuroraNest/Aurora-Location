@@ -69,6 +69,12 @@ struct SetupView: View {
                 }
 
                 Section {
+                    NavigationLink("蜂窝连接实验", destination: PersonalVPNView(state: state))
+                } footer: {
+                    Text("原生 IKEv2 与小火箭共存的实验入口, 需要独立服务端. 尚未验证能解决蜂窝定位限制.")
+                }
+
+                Section {
                     if pairing.hasPairing {
                         Label("已保存本机配对凭据", systemImage: "checkmark.shield")
                         Text("配对凭据只保存在本机. PIN 不会写入日志.")

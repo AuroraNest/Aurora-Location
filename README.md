@@ -13,6 +13,7 @@ Aurora Location 是面向个人 iPhone 修改定位工具. 它以 SwiftUI 和 Ma
 - 本地收藏和最多 20 条去重的最近位置.
 - 严格校验的 `auroralocation` URL Scheme, 中文错误提示和脱敏诊断.
 - 为 Shadowrocket 导出设备生成的本地 WireGuard peer 配置和分流模块.
+- 可选的原生 IKEv2 Personal VPN 共存实验入口, 不代表蜂窝定位已修复.
 
 `最近操作` 只表示指令在 App 端完成, 不代表系统仍在模拟定位. 每次启动的状态均为未知, 请用 Apple Maps 或目标测试 App 人工验证.
 
@@ -34,7 +35,7 @@ sh scripts/check.sh
 
 `scripts/check.sh` 运行 URL/坐标和本地存储模型检查, FFI 会话 stub 检查和 plist lint. 它不是设备协议或模拟定位验收.
 
-在 Xcode 打开 `AuroraLocation.xcodeproj`, 选择 `AuroraLocation` scheme. 在 `Signing & Capabilities` 中选择自己的 Developer Team, 使用 `Automatically manage signing`, 并改为自己唯一的 Bundle ID. 仓库不包含 Team ID, signing certificate 或 provisioning profile. 如需本机 Team 配置, 创建未纳入 Git 的 `Signing.xcconfig`, 项目已有可选 include.
+在 Xcode 打开 `AuroraLocation.xcodeproj`, 选择 `AuroraLocation` scheme. 在 `Signing & Capabilities` 中选择自己的 Developer Team, 使用 `Automatically manage signing`, 并改为自己唯一的 Bundle ID. 签名需包含 Personal VPN 能力, 通配符 profile 不足以支持新增实验功能. 仓库不包含 Team ID, signing certificate 或 provisioning profile. 如需本机 Team 配置, 创建未纳入 Git 的 `Signing.xcconfig`, 项目已有可选 include.
 
 可做无签名 device build:
 
@@ -96,6 +97,16 @@ App 只在本机剪贴板暂存连接配置 2 分钟. 配置含该设备的 Wire
 
 暂停保持当前位置, 继续从暂停点前进. 到达后保持终点, `结束模拟步行` 发送恢复真实定位请求. 步行期间禁止定点按钮和 URL set 覆盖路线. 约每秒更新, 指令成功后才推进显示进度; 连接失败或步行执行间隔超过 8 秒时中断且不追赶跳点, 系统定位状态视为未知. 该功能不解决蜂窝连接限制, 不保证 iOS 挂起后的持续步行.
 
+## 蜂窝连接实验
+
+设置 > 蜂窝连接实验提供独立的原生 IKEv2 管理页. 需填写真实 IKEv2 服务器地址, 已确认的 Remote ID, 用户名和密码; 不能使用小火箭订阅或普通代理节点代替. 首次保存需系统授权, 密码仅存本机 Keychain. 不自动连接, 可断开或移除本 App 的 IKEv2 配置.
+
+[Apple 文档](https://developer.apple.com/documentation/networkextension/netunnelprovidermanager)支持 Personal VPN 与一个 enterprise VPN 共存. 此入口仅用于验证这种组合, 尚未证明能解决纯蜂窝下的开发者服务限制. 必须分别检查小火箭外网, Remote Pairing/DVT, set/clear 和持续保持; VPN 显示已连接不等于定位成功.
+
+定位、步行和 IKEv2 现在使用同一个 App, 连接管理仍在设置的独立页面. 项目沿用已有 VPN 权限的 `com.auroraleelabs.AuroraLocation.IKEv2Lab` 标识, 显示名称为 `Aurora Location`; 覆盖安装旧 `Aurora 连接实验` 可保留其 VPN 配置和 Keychain 密码. 不再构建只含连接页的实验包.
+
+旧主 App 的 Bundle ID 不同, 配对、收藏、历史和本机隧道密钥不会自动迁移. 迁移时须保留并验证 `Library/Application Support` 中的 `Pairing`、`Places` 和 `Tunnel`, 不能生成新密钥替换已有小火箭 peer. 系统定位权限需在合并后的 App 单独确认. 验证前保留旧 App; 两个 App 同时保留时不要依赖 `auroralocation` URL 的打开目标. 自行签名仍需使用自己的唯一 Bundle ID.
+
 ## 快捷指令和 URL Scheme
 
 在 Apple Shortcuts 中用 `URL` 动作建立链接, 再用 `Open URLs` 打开:
@@ -123,7 +134,7 @@ auroralocation://clear
 
 - 配对记录和 WireGuard keys 位于 Application Support, 使用 Complete Data Protection, owner-only 目录权限, 并排除 iCloud/iTunes backup.
 - PIN 不写入日志. 脱敏诊断只含版本、配对存在标记、网络/服务状态、中继统计和固定错误码.
-- 收藏和历史仅存本机. 没有账号、analytics、自建服务器或云同步.
+- 收藏和历史仅存本机. 没有应用账号, analytics 或云同步. 可选 IKEv2 使用用户指定的 VPN 服务端和凭据.
 - 后台监测的观测位置不保存或上传; 会显示系统定位指示并增加耗电, 可在设置关闭.
 - Debug 构建仅在本机保留最近 40 条权限、生命周期和指令状态事件, 不含坐标或配对数据.
 - MapKit 搜索、地图和反向地理编码会使用 Apple 服务, 因此不是完全离线功能.
@@ -135,7 +146,7 @@ auroralocation://clear
 - 2026-09-11 真机纯蜂窝新建握手仍失败, 分类为 socket 提前关闭; Wi-Fi 切蜂窝后换点也失败. 蜂窝支持尚未解决. 无互联网 Wi-Fi 新会话, 重启后 clear 和全部目标 App 行为仍未验证.
 - 已有用户真机反馈确认单 VPN 模拟定位成功, 但完整的 set/换点/clear、Apple Maps、重启、前后台和蜂窝网络验收矩阵仍未完成.
 - 不自动下载或挂载 DDI. 开发者服务出错时先用 Xcode 重新准备设备.
-- 不实现 joystick, GPX, 多途经点编辑, 账号, 云同步, 反检测, 内置 VPN 或 Simulator DVT.
+- 不实现 joystick, GPX, 多途经点编辑, 应用账号, 云同步, 反检测, 自定义 VPN 协议核心或 Simulator DVT.
 
 以 [docs/TEST_PLAN.md](docs/TEST_PLAN.md) 中未勾选项目作为实际验收清单. [docs/SHADOWROCKET.md](docs/SHADOWROCKET.md) 记录单 VPN 证据和限制.
 

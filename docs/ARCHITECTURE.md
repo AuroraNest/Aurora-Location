@@ -44,4 +44,12 @@ MapKit 服务失败或未找到路线时自动尝试 FOSSGIS 的独立 OSRM foot
 
 ## 单 VPN 验证
 
-用户已明确不安装第二个 VPN, 保持 Shadowrocket 全天连接. 因此当前实现不增加 `NEPacketTunnelProvider`, 通过 App 内本机中继验证既有小火箭的 loopback 行为. 具体证据、候选连接参数和验收边界见 [SHADOWROCKET.md](SHADOWROCKET.md). 未通过真机 DVT set/clear 前不宣称该路径兼容.
+默认连接通过 App 内本机中继使用既有 Shadowrocket, 不增加 `NEPacketTunnelProvider`. 具体证据、候选连接参数和验收边界见 [SHADOWROCKET.md](SHADOWROCKET.md). 未通过真机 DVT set/clear 前不宣称该路径兼容.
+
+## Personal VPN 共存实验
+
+定位和 IKEv2 只保留一个 App 入口, 共用 AppState. 定点/步行标签不变, IKEv2 位于设置的独立页面. Bundle ID 沿用原 IKEv2Lab 以保留系统 VPN 配置和 Keychain; 旧主 App 的文件容器需单独迁移, 不能将相同 Keychain service 名称视为跨 App 共享.
+
+设置页的独立蜂窝连接实验入口使用 `NEVPNManager` 管理原生 IKEv2 Personal VPN, 需要独立的 IKEv2 服务端和带 Personal VPN 能力的签名. Apple 支持 Personal VPN 与一个 enterprise VPN 同时连接, 但这不证明 Shadowrocket 的开发者连接会改变蜂窝属性或能够修改定位.
+
+只管理本 App 的 IKEv2 配置, 不管理 Shadowrocket 配置. 使用系统服务器证书验证和 EAP 用户名/密码, 密码保存在本机 Keychain, 通过 persistent reference 交给系统. 不启用 On Demand, 不设置 includeAllNetworks. 定位或配对进行中禁止从实验页调整 VPN. 新页面不会自动创建配置或启动 VPN.

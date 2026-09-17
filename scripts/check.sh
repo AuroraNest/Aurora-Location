@@ -28,4 +28,9 @@ xcrun swiftc -module-cache-path "$test_dir/cache" \
   AuroraLocation/App/AppState.swift Tests/AppStateWalkingCheck.swift \
   -o "$test_dir/walking-state-check"
 "$test_dir/walking-state-check"
-plutil -lint AuroraLocation/Resources/Info.plist AuroraLocation.xcodeproj/project.pbxproj
+xcrun swiftc -module-cache-path "$test_dir/cache" \
+  AuroraLocation/Core/PersonalVPN.swift Tests/PersonalVPNCheck.swift \
+  -o "$test_dir/personal-vpn-check"
+"$test_dir/personal-vpn-check"
+plutil -lint AuroraLocation/Resources/Info.plist AuroraLocation/Resources/AuroraLocation.entitlements \
+  AuroraLocation.xcodeproj/project.pbxproj

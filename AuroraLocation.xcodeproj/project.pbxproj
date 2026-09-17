@@ -16,6 +16,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Resources/Info.plist,
+				Resources/AuroraLocation.entitlements,
 			);
 			target = A00000000000000000000002 /* AuroraLocation */;
 		};
@@ -93,6 +94,9 @@
 				TargetAttributes = {
 					A00000000000000000000002 = {
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.VPNLite = { enabled = 1; };
+						};
 					};
 				};
 			};
@@ -166,6 +170,7 @@
 			baseConfigurationReference = A00000000000000000000017 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = AuroraLocation/Resources/AuroraLocation.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -196,7 +201,7 @@
 					"-framework",
 					SystemConfiguration,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.auroraleelabs.AuroraLocation;
+				PRODUCT_BUNDLE_IDENTIFIER = com.auroraleelabs.AuroraLocation.IKEv2Lab;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
@@ -210,6 +215,7 @@
 			baseConfigurationReference = A00000000000000000000017 /* Config.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = AuroraLocation/Resources/AuroraLocation.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -240,7 +246,7 @@
 					"-framework",
 					SystemConfiguration,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.auroraleelabs.AuroraLocation;
+				PRODUCT_BUNDLE_IDENTIFIER = com.auroraleelabs.AuroraLocation.IKEv2Lab;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = iphoneos;
 				SUPPORTS_MACCATALYST = NO;

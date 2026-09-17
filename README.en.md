@@ -13,6 +13,7 @@ The project implements an on-device iOS 27 `Remote Pairing` flow and establishes
 - Local favorites and up to 20 deduplicated recent locations.
 - Strict `auroralocation` URL Scheme validation, Chinese error messages, and redacted diagnostics.
 - Export of a device-generated local WireGuard peer and Shadowrocket routing module.
+- An optional native IKEv2 Personal VPN coexistence experiment. Cellular location support remains unverified.
 
 `Last operation` means only that the App-side command completed. It does not report the current system simulation state. Every launch begins in an unknown state; verify with Apple Maps or the app under test.
 
@@ -34,7 +35,7 @@ sh scripts/check.sh
 
 `scripts/check.sh` runs URL/coordinate and local-storage model checks, an FFI-session stub check, and plist lint. It is not a device-protocol or simulated-location acceptance test.
 
-Open `AuroraLocation.xcodeproj` in Xcode and select the `AuroraLocation` scheme. Under `Signing & Capabilities`, select your own Developer Team, use `Automatically manage signing`, and change to your own unique Bundle ID. The repository includes no Team ID, signing certificate, or provisioning profile. To keep a local Team selection in configuration, create an untracked `Signing.xcconfig`; the existing configuration includes it optionally.
+Open `AuroraLocation.xcodeproj` in Xcode and select the `AuroraLocation` scheme. Under `Signing & Capabilities`, select your own Developer Team, use `Automatically manage signing`, and change to your own unique Bundle ID. Signing must include the Personal VPN capability; a wildcard profile cannot support the new experiment. The repository includes no Team ID, signing certificate, or provisioning profile. To keep a local Team selection in configuration, create an untracked `Signing.xcconfig`; the existing configuration includes it optionally.
 
 For an unsigned device build:
 
@@ -96,6 +97,16 @@ The fallback sends selected endpoints to FOSSGIS, which logs requests. The UI in
 
 Pause holds the current point, resume continues from there, and arrival holds the endpoint until End sends clear. Fixed-location buttons and URL set cannot overwrite an active walk. Updates run approximately every second and publish progress only after a successful command. Failures or walking execution gaps longer than 8 seconds interrupt without jumping ahead; system location is then unknown. This does not resolve cellular connectivity or guarantee execution after iOS suspension.
 
+## Cellular connection experiment
+
+Settings > `蜂窝连接实验` opens a separate native IKEv2 page. It requires a real IKEv2 server, verified Remote ID, username and password; a Shadowrocket subscription or ordinary proxy node is insufficient. The system asks permission when saving the first configuration. Passwords stay in the local Keychain. The app does not connect automatically and can disconnect or remove its own configuration.
+
+[Apple documents](https://developer.apple.com/documentation/networkextension/netunnelprovidermanager) coexistence between a Personal VPN and one enterprise VPN. This experiment has not established that the combination resolves cellular developer-service restrictions. Verify Shadowrocket internet access, Remote Pairing/DVT, set/clear and retention separately. A connected VPN is not evidence of successful location simulation.
+
+Location, walking and IKEv2 now share one app, with connection management on its own settings page. The project keeps the VPN-enabled `com.auroraleelabs.AuroraLocation.IKEv2Lab` identifier and displays `Aurora Location`. Updating the old connection experiment app preserves its VPN configuration and Keychain password. There is no separate connection-only build.
+
+The old main app has a different Bundle ID, so pairing, favorites, history and local tunnel keys do not migrate automatically. Preserve and verify `Pairing`, `Places` and `Tunnel` under `Library/Application Support` during migration; do not regenerate keys for the existing Shadowrocket peer. Confirm system location permissions separately for the combined app. Keep the old app until verification, and do not rely on URL routing while both register `auroralocation`. Use your own unique Bundle ID when signing independently.
+
 ## Shortcuts and URL Scheme
 
 In Apple Shortcuts, create a `URL` action and pass it to `Open URLs`:
@@ -123,7 +134,7 @@ auroralocation://clear
 
 - Pairing records and WireGuard keys live in Application Support with Complete Data Protection, owner-only directory permissions, and backup exclusion.
 - PINs are not logged. Redacted diagnostics contain only version, pairing-present state, network/service state, responder counters, and fixed error codes.
-- Favorites and history are local only. There are no accounts, analytics, self-hosted servers, or cloud sync.
+- Favorites and history are local only. There are no app accounts, analytics or cloud sync. Optional IKEv2 uses the user's chosen VPN server and credentials.
 - Background monitoring does not save or upload observed coordinates. Debug builds keep only the latest 40 authorization, lifecycle, and command-status events locally, without coordinates or pairing data.
 - MapKit search, maps, and reverse geocoding use Apple services, so those features are not fully offline.
 - Connection configuration and pairing records are sensitive. Deleting the app or its data can remove local credentials, requiring new pairing and peer export.
@@ -134,7 +145,7 @@ auroralocation://clear
 - Physical-device tests on 2026-09-11 still failed to open a cellular-only session with a socket unexpected EOF; changing the location after switching from Wi-Fi to cellular also failed. Cellular support remains unresolved. New sessions on Wi-Fi without internet, clear after restart, and behavior in all target apps remain unverified.
 - User physical-device feedback confirms single-VPN simulated location, but the full set/change-point/clear, Apple Maps, restart, foreground/background, and cellular acceptance matrix remains incomplete.
 - The app does not download or mount DDI. If developer services fail, prepare the device again in Xcode.
-- There is no joystick, GPX, multi-waypoint editing, account, cloud sync, detection evasion, embedded VPN, or Simulator DVT.
+- There is no joystick, GPX, multi-waypoint editing, app account, cloud sync, detection evasion, custom VPN protocol engine, or Simulator DVT.
 
 Use unchecked entries in [docs/TEST_PLAN.md](docs/TEST_PLAN.md) as the actual acceptance checklist. [docs/SHADOWROCKET.md](docs/SHADOWROCKET.md) records the single-VPN evidence and limits.
 
