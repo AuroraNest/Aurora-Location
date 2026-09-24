@@ -4,7 +4,7 @@
 
 Aurora Location 是面向个人 iPhone 修改定位工具. 它以 SwiftUI 和 MapKit 选点, 通过 Apple DVT `LocationSimulation` 请求设置模拟坐标或恢复真实定位. 它不修改第三方 App, 不提供规避第三方检测的功能, 也不以 App Store 发布为目标.
 
-项目实现了 iOS 27 本机 `Remote Pairing`, 并通过既有 Shadowrocket 单 VPN 配置建立开发者连接. 已有用户真机反馈确认 Aurora Location + Shadowrocket 单 VPN 的模拟定位成功, 系统配对列表和 App 配对保存也已确认. 这不等于所有场景均已验收: 完整的 set/换点/clear 矩阵, Apple Maps 复核, 前后台保持和纯蜂窝新连接仍须按 [测试计划](docs/TEST_PLAN.md) 在真机逐项验收.
+项目实现了 iOS 27 本机 `Remote Pairing`, 支持原有 Shadowrocket 通道和独立 Aurora VPN 联动. 2026-09-24 用户已确认 Wi-Fi/蜂窝下定位与代理均可用, Wi-Fi 已建立的定位会话切到蜂窝后可保留. 首次蜂窝建连仍使用短暂断蜂窝流程. 长期锁屏、节点故障恢复和 clear 后持续传输仍按 [测试计划](docs/TEST_PLAN.md) 单独验收.
 
 ## 功能
 
@@ -13,17 +13,18 @@ Aurora Location 是面向个人 iPhone 修改定位工具. 它以 SwiftUI 和 Ma
 - 本地收藏和最多 20 条去重的最近位置.
 - 严格校验的 `auroralocation` URL Scheme, 中文错误提示和脱敏诊断.
 - 为 Shadowrocket 导出设备生成的本地 WireGuard peer 配置和分流模块.
-- 独立的蜂窝修改按钮, 使用 AL 内置本机 VPN, 附带每次可查看的手动离线启动提示. 不提供外网代理.
+- 独立的蜂窝修改按钮及系统快捷指令助手, 支持原内置本机 VPN 或 Aurora VPN 外部模式. 原内置通道不提供外网代理.
+- Aurora VPN 外部模式可同时使用定位与代理, 结束定位不停止外部 VPN.
 - 可选的原生 IKEv2 Personal VPN 共存实验入口, 不代表蜂窝定位已修复.
 
 `最近操作` 只表示指令在 App 端完成, 不代表系统仍在模拟定位. 每次启动的状态均为未知, 请用 Apple Maps 或目标测试 App 人工验证.
 
 ## 要求
 
-- macOS 和 Xcode. App deployment target 为 iOS 18.0. 已验证构建参考为 Xcode 26.6 和 iPhoneOS SDK 26.5, 不是最低版本承诺.
+- macOS 和 Xcode. App deployment target 为 iOS 18.0. 当前已验证构建为 Xcode 27 和 iPhoneOS SDK 27, 不是最低版本承诺.
 - 已启用 Developer Mode 的 iPhone. 当前首次本机 Remote Pairing 要求 iOS 27.
 - 可用的 Apple Developer signing identity 和 provisioning. Xcode 必须先完成设备准备和 DDI 服务可用.
-- Shadowrocket, 可在现有单 VPN 配置中导入本地 WireGuard peer 和模块. 已记录的兼容参考是 2.2.92 (3445), 不是最低版本承诺. 不需要第二个 VPN App.
+- 选择 Aurora VPN 外部模式, 或保留 Shadowrocket 原通道. 原通道需导入本地 WireGuard peer 和模块, 已记录兼容参考为 2.2.92 (3445), 不是最低版本承诺. 不需要同时运行两个 VPN.
 - arm64 真机. Native 静态库不提供 Simulator slice.
 
 ## 获取源码和构建
