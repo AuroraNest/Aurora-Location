@@ -43,6 +43,9 @@ struct FixedLocationView: View {
     @State private var showingCoordinateEntry = false
     @State private var showingFavoriteEntry = false
     @State private var favoriteName = ""
+    @State private var showingOutdoorHelp = false
+    @State private var showingCellularSetup = false
+    @AppStorage(CellularShortcut.installedKey) private var cellularInstalled = false
 
     var body: some View {
         NavigationStack {
@@ -113,15 +116,64 @@ struct FixedLocationView: View {
                     }
                     .disabled(isActionBusy)
 
-                    Button("开启模拟定位", systemImage: "location.fill") {
+                    Button(state.connectionMode == .auroraVPN ? "连接 Aurora VPN 并定位" : "开启模拟定位", systemImage: "location.fill") {
                         execute(.set(state.selected))
                     }
                     .disabled(isActionBusy || state.isWalkingSessionActive)
+
+                    Button(state.isOutdoorPrepared && state.connectionMode == .existing ? "继续蜂窝修改" : "蜂窝修改", systemImage: "antenna.radiowaves.left.and.right") {
+                        if state.isOutdoorPrepared && state.connectionMode == .existing {
+                            showingOutdoorHelp = true
+                        } else if cellularInstalled || state.isSimulating {
+                            Task { await state.startAutomaticOutdoor() }
+                        } else {
+                            showingCellularSetup = true
+                        }
+                    }
+                    .disabled(isActionBusy || state.isWalkingSessionActive)
+                    .alert("户外蜂窝修改", isPresented: $showingOutdoorHelp) {
+                        Button("取消", role: .cancel) {}
+                        Button(state.isOutdoorMode && state.isSimulating ? "修改到选中位置" : state.isOutdoorPrepared ? "已关闭蜂窝, 继续定位" : "蜂窝已开启, 连接本机 VPN") {
+                            Task {
+                                if state.isOutdoorPrepared || (state.isOutdoorMode && state.isSimulating) {
+                                    await state.executeOutdoor()
+                                } else {
+                                    await state.prepareOutdoor()
+                                }
+                            }
+                        }
+                    } message: {
+                        Text(state.isOutdoorMode && state.isSimulating
+                             ? "当前户外会话可直接换点, 保持小火箭关闭."
+                             : state.isOutdoorPrepared
+                             ? "本机 VPN 已连接. 现在关闭蜂窝, 保持 Wi-Fi 和小火箭关闭, 再继续定位.\n\n确认位置成功后可恢复蜂窝."
+                             : "先选好位置, 关闭 Wi-Fi 和小火箭, 保持蜂窝开启. 先连接本机 VPN, 首次请允许添加配置.\n\n连接后再关闭蜂窝, 回到此处继续定位. 完成并确认位置后可恢复蜂窝, 保持小火箭关闭.")
+                    }
+                    if state.isOutdoorPrepared && state.connectionMode == .existing {
+                        Text("本机 VPN 已准备, 尚未修改位置. 请关闭蜂窝, 再点继续蜂窝修改.")
+                            .font(.footnote)
+                        Button("取消准备", role: .cancel) {
+                            Task { await state.cancelOutdoorPreparation() }
+                        }
+                        .disabled(isActionBusy)
+                    }
+                    if state.isOutdoorMode && state.isSimulating {
+                        Text(state.connectionMode == .auroraVPN
+                             ? "户外会话已建立. 确认定位后可恢复蜂窝. 恢复真实定位后 Aurora VPN 仍保持连接."
+                             : "户外会话已建立. 确认定位后可恢复蜂窝, 保持小火箭关闭. 结束请点恢复真实定位.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
                     if state.isWalkingSessionActive {
                         Text("模拟步行进行中. 请切换到模拟步行页面暂停或结束.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                    }
+                    if state.needsCellularRecovery && !state.isBusy {
+                        Button("恢复蜂窝") {
+                            Task { await state.recoverCellular() }
+                        }
                     }
                 }
 
@@ -150,7 +202,14 @@ struct FixedLocationView: View {
             }
             .overlay {
                 if state.isBusy && !state.isWalkingSessionActive {
-                    ProgressView("正在处理")
+                    VStack(spacing: 12) {
+                        ProgressView(state.automaticOutdoorStatus ?? "正在处理")
+                        if state.canCancelAutomaticOutdoor {
+                            Button("取消并恢复蜂窝") { Task { await state.cancelAutomaticOutdoor() } }
+                        } else if state.canCancelAuroraVPN {
+                            Button("取消连接") { state.cancelAuroraVPNConnection() }
+                        }
+                    }
                         .padding()
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
@@ -170,6 +229,10 @@ struct FixedLocationView: View {
         .task {
             state.refresh()
             reverseGeocode(state.selected)
+            await state.resumeCellularRecovery()
+        }
+        .sheet(isPresented: $showingCellularSetup) {
+            CellularShortcutSetupView(state: state)
         }
         .sheet(isPresented: $showingCoordinateEntry) {
             CoordinateEntryView { coordinate, name in
@@ -400,6 +463,43 @@ struct NativeMapView: UIViewRepresentable {
             let coordinate = Coordinate(latitude: location.latitude, longitude: location.longitude)
             guard coordinate.isValid else { return }
             onSelect(coordinate)
+        }
+    }
+}
+
+struct CellularShortcutSetupView: View {
+    @ObservedObject var state: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("一次设置, 之后一键修改") {
+                    Text(state.connectionMode == .auroraVPN
+                         ? "安装 \(CellularShortcut.name)后, App 会自动关闭 Wi-Fi, 打开 Aurora VPN 并等待连接就绪, 临时关闭蜂窝完成定位, 最后重新开启蜂窝."
+                         : "安装 \(CellularShortcut.name)后, App 会自动关闭 Wi-Fi, 连接本机 VPN, 临时关闭蜂窝并修改定位, 最后重新开启蜂窝. 首次运行请允许系统提示.")
+                    if let url = Bundle.main.url(forResource: "AuroraCellular", withExtension: "shortcut") {
+                        ShareLink("安装配套快捷指令", item: url)
+                    }
+                    Button("已安装, 开始自动修改") {
+                        dismiss()
+                        Task { await state.startAutomaticOutdoor() }
+                    }
+                    .disabled(state.isBusy || state.pairing.isBusy)
+                }
+                if state.connectionMode == .existing {
+                Section("手动方式") {
+                    Text("关闭 Wi-Fi 和小火箭, 保持蜂窝开启. 连接后关闭蜂窝, 回主页面继续修改.")
+                    Button("连接本机 VPN") {
+                        dismiss()
+                        Task { await state.prepareOutdoor() }
+                    }
+                    .disabled(state.isBusy || state.pairing.isBusy)
+                }
+                }
+            }
+            .navigationTitle("蜂窝修改设置")
+            .toolbar { Button("关闭") { dismiss() } }
         }
     }
 }

@@ -8681,15 +8681,9 @@ struct IdeviceFfiError *tunnel_create_remotexpc(const idevice_sockaddr *addr,
 /**
  * Creates a tunnel over the network via raw RPPairing protocol.
  *
- * Use this when connecting to a device discovered via `_remotepairing._tcp`.
- * The connection goes: direct TCP → RPPairing (JSON) → tunnel.
- *
- * `pairing_file` is used for pair-verify. If verification fails (typically
- * because the device has never been paired with this host) a full pair-setup
- * runs on the same connection and `pairing_file` is updated in place, so the
- * caller should persist it afterwards regardless of whether it was freshly
- * generated.
- *
+ * This preserves the original ABI and delegates to
+ * [`aurora_tunnel_create_rppairing_with_progress`] without a progress callback.
+ * See that function for the connection flow and ownership requirements.
  *
  * # Safety
  * All pointer arguments must be valid and non-null (except `pin_callback`/`pin_context`).
@@ -8703,6 +8697,42 @@ struct IdeviceFfiError *tunnel_create_rppairing(const idevice_sockaddr *addr,
                                                 void *pin_context,
                                                 struct AdapterHandle **out_adapter,
                                                 struct RsdHandshakeHandle **out_handshake);
+
+/**
+ * Creates a raw RPPairing tunnel and reports its synchronous connection stages.
+ *
+ * Use this when connecting to a device discovered via `_remotepairing._tcp`.
+ * The connection goes: direct TCP → RPPairing (JSON) → tunnel.
+ *
+ * `pairing_file` is used for pair-verify. If verification fails (typically
+ * because the device has never been paired with this host) a full pair-setup
+ * runs on the same connection and `pairing_file` is updated in place, so the
+ * caller should persist it afterwards regardless of whether it was freshly
+ * generated.
+ *
+ *
+ * `progress_callback`, when non-null, is called synchronously before each stage
+ * with `completed=false`, then with `completed=true` only after that stage succeeds.
+ * The callback receives only the fixed stage IDs: 1 pairing TCP, 2 pairing verify,
+ * 3 listener creation, 4 tunnel TCP, 5 TLS-PSK and CDTunnel handshake, 6 adapter
+ * creation and RSD-port connect, and 7 RSD handshake. It receives no network
+ * addresses, keys, payloads, or error values. All callbacks finish before this
+ * function returns; the callback must remain valid for the duration of this call.
+ *
+ * # Safety
+ * All pointer arguments must be valid and non-null (except `pin_callback`,
+ * `pin_context`, and `progress_callback`). `pairing_file` is borrowed, not consumed.
+ */
+struct IdeviceFfiError *aurora_tunnel_create_rppairing_with_progress(const idevice_sockaddr *addr,
+                                                                     idevice_socklen_t addr_len,
+                                                                     const char *hostname,
+                                                                     struct RpPairingFileHandle *pairing_file,
+                                                                     const char *(*pin_callback)(void *context),
+                                                                     void *pin_context,
+                                                                     struct AdapterHandle **out_adapter,
+                                                                     struct RsdHandshakeHandle **out_handshake,
+                                                                     void (*progress_callback)(uint32_t stage,
+                                                                                               bool completed));
 
 /**
  * Pairs with a device over the network via raw RPPairing, without creating a tunnel.

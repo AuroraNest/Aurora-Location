@@ -9,11 +9,13 @@ enum LocationEngine {
     private static var server: OpaquePointer?
     private static var simulation: OpaquePointer?
     private static var failureDetails = ""
+    private static var tunnelStage: String?
 
     static func perform(_ command: LocationCommand?, pairingPath: String) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
                 failureDetails = ""
+                tunnelStage = nil
                 do {
                     if case .set(let coordinate) = command, !coordinate.isValid {
                         throw AuroraLocationError.invalidCoordinate
@@ -76,8 +78,23 @@ enum LocationEngine {
         try call("tunnel.create-rppairing", as: .tunnelUnavailable) {
             withUnsafePointer(to: &address) { pointer in
                 pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    tunnel_create_rppairing($0, socklen_t(MemoryLayout<sockaddr_in>.size),
-                        "Aurora Location", pairing, nil, nil, &adapter, &handshake)
+                    aurora_tunnel_create_rppairing_with_progress($0, socklen_t(MemoryLayout<sockaddr_in>.size),
+                        "Aurora Location", pairing, nil, nil, &adapter, &handshake) { stage, completed in
+                            let name: String
+                            switch stage {
+                            case 1: name = "pairing-tcp"
+                            case 2: name = "pairing-verify"
+                            case 3: name = "listener-create"
+                            case 4: name = "tunnel-tcp"
+                            case 5: name = "tls-psk"
+                            case 6: name = "adapter-connect"
+                            case 7: name = "rsd-handshake"
+                            default: return
+                            }
+                            // Native callbacks finish before this serialized FFI call returns.
+                            LocationEngine.tunnelStage = completed ? nil : name
+                            DiagnosticLog.event("tunnel.\(name).\(completed ? "ok" : "begin")")
+                        }
                 }
             }
         }
@@ -92,6 +109,10 @@ enum LocationEngine {
             try checked(operation(), as: failure)
             DiagnosticLog.event("\(stage).ok")
         } catch {
+            if let tunnelStage {
+                DiagnosticLog.event("tunnel.\(tunnelStage).failed \(failureDetails)")
+                self.tunnelStage = nil
+            }
             DiagnosticLog.event("\(stage).failed \(failureDetails)")
             throw error
         }
@@ -112,8 +133,8 @@ enum LocationEngine {
             else if message.contains("brokenpipe") || message.contains("broken pipe") { category = "连接写入中断" }
             else if message.contains("permissiondenied") || message.contains("permission denied") { category = "系统拒绝访问" }
             else { category = "其他协议错误" }
-            let stage = message.contains("tls tunnel:") ? "tunnel-tcp" :
-                (message.contains("connect:") ? "pairing-tcp" : "unspecified")
+            let stage = tunnelStage ?? (message.contains("tls tunnel:") ? "tunnel-tcp" :
+                (message.contains("connect:") ? "pairing-tcp" : "unspecified"))
             failureDetails = "\(failure.rawValue): \(category), code \(error.pointee.code), sub \(error.pointee.sub_code), stage \(stage)"
             idevice_error_free(error)
             throw failure

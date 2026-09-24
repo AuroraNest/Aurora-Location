@@ -20,6 +20,20 @@ struct SetupView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("定位连接方式") {
+                    Picker("连接方式", selection: $state.connectionMode) {
+                        Text("现有通道").tag(ConnectionMode.existing)
+                        Text("Aurora VPN").tag(ConnectionMode.auroraVPN)
+                    }
+                    .disabled(state.isBusy || state.isSimulating || state.isOutdoorPrepared || pairing.isBusy)
+                    Text("Aurora VPN 模式由独立 App 建立连接, 本 App 仅发送定位指令. 结束定位后 VPN 仍保持连接.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("蜂窝修改") {
+                    NavigationLink("设置一键蜂窝修改") {
+                        CellularShortcutSetupView(state: state)
+                    }
+                }
                 Section("连接状态") {
                     LabeledContent("最近操作", value: state.lastOperation)
                     LabeledContent("配对", value: pairing.status)
@@ -32,6 +46,9 @@ struct SetupView: View {
                         Task { await state.checkConnection() }
                     }
                     .disabled(pairing.isBusy || state.isBusy)
+                    if state.canCancelAuroraVPN {
+                        Button("取消 Aurora VPN 连接", role: .cancel) { state.cancelAuroraVPNConnection() }
+                    }
                 }
 
                 Section("后台位置监测") {
@@ -47,6 +64,7 @@ struct SetupView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
 
+                if state.connectionMode == .existing {
                 Section("Shadowrocket 本机连接") {
                     Text("保持小火箭连接. 模拟定位期间保留连接和本机中继, 点恢复真实定位后关闭. App 在后台被系统挂起或终止时可能恢复真实位置.")
                     Button(configCopied ? "已复制, 请切到小火箭导入" : "复制小火箭连接配置", systemImage: "doc.on.doc") {
@@ -66,6 +84,7 @@ struct SetupView: View {
                     }
                     Text("仅用于本机小火箭, 剪贴板 2 分钟后过期. 配置含连接密钥, 不含 Apple 配对凭据, 不要上传到订阅或分享给他人.")
                         .font(.footnote).foregroundStyle(.secondary)
+                }
                 }
 
                 Section {
@@ -111,7 +130,9 @@ struct SetupView: View {
                     step(2, "打开系统 设置 > 隐私与安全性 > 开发者模式 > Pair with Host.")
                     step(3, "选择 Aurora Location, 输入设备锁屏密码.")
                     step(4, "在系统提示中输入这里显示的 6 位 PIN, 然后返回 App.")
-                    Text("请允许本地网络和通知权限并连接 Wi-Fi. PIN 通知会自动清理. 配对完成后保持 Shadowrocket 连接, 再检测开发者服务.")
+                    Text(state.connectionMode == .auroraVPN
+                         ? "请允许本地网络和通知权限并连接 Wi-Fi. PIN 通知会自动清理. 配对完成后连接 Aurora VPN, 再检测开发者服务."
+                         : "请允许本地网络和通知权限并连接 Wi-Fi. PIN 通知会自动清理. 配对完成后保持 Shadowrocket 连接, 再检测开发者服务.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

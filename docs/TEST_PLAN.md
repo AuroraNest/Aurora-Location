@@ -1,5 +1,59 @@
 # 测试与真机验收
 
+## 2026-09-24 Aurora VPN 联动验收更新
+
+- 用户确认 Wi-Fi 和蜂窝下修改定位均成功, Aurora VPN 在两种网络下正常使用.
+- 用户明确确认 Wi-Fi 已建立的定位会话切换到蜂窝后能够保留. 此项记为用户实测通过, 未补采切换瞬间日志.
+- 工具侧验证: Wi-Fi 受控请求在 VPN 内显示实际节点 chain/字节; Location 外部模式 URL 往返及真实 DVT 检测成功, 检测结束后 VPN 保持.
+- set/换点/clear 由用户操作. clear 后持续传输、节点故障恢复、15 分钟锁屏和长期内存表现未逐项确认, 继续独立验收.
+- 下文保留历史测试记录; 当前实现和经验见 [JOURNEY.md](JOURNEY.md).
+
+## 2026-09-22 自动蜂窝回调
+
+- 用户真机点击后停在准备网络. 首版日志显示回调被拒绝; 兼容系统 errorDomain 后, 连续 4 次均确认 prepare 返回 errorCode=4, 没有进入定位阶段.
+- v2 使用普通 run-shortcut URL 传入阶段和随机令牌绑定的完成 URL, 由助手执行对应动作后主动打开该 URL. 不将错误码 4 或等待时长当作成功.
+- sh scripts/check.sh 已通过 v2 协议检查, 包括禁止 x-callback 参数, 回调过期和重放拒绝, 坐标冻结, 取消恢复以及重启不重放定位.
+- 待真机验收: 添加 Aurora 蜂窝助手 2, 点击一次蜂窝修改, 确认 prepare/offline/restore 回调依次成功, DVT set 完成且蜂窝恢复. 构建和签名不代表此验收通过.
+
+## 2026-09-21 离线启动系统日志
+
+- 用户导出的设备日志确认, 23:13:11、23:14:36、23:17:04 的 AL 本机 VPN 请求在 `NESMVPNSessionStatePreparingNetwork` 返回 `No network available`, 随即回到 disconnected, 没有进入扩展启动阶段. App 约 10 秒后读到 `NEVPNConnectionErrorDomain code=2`. 不是配对验证或定位指令失败.
+- 同日蜂窝开启时 AL 扩展可启动, 但开发者 TCP 预检返回 `posix=61`. 不能通过增加 VPN 等待时间或调整包反射逻辑修复启动前的系统拒绝.
+- 当前设备上的 LocalDevVPN 也无法在 Wi-Fi、蜂窝均关闭时新建 VPN. 用户确认先开启蜂窝连接 LocalDevVPN, 再关闭蜂窝, 10 秒后 VPN 仍显示已连接. 这只证明连接状态保留.
+- 随后的只握手检测 run `C1DB3BF8-057B-482B-A0CF-36E44CBF6793` 在 `pairing-tcp` 返回网络不可达, code16/sub0, 没有进入 RPPairing 或发送 set/clear. 用户报告 LocalDevVPN 地址为 Tunnel `10.7.0.2/30`, Device `10.7.0.1/32`. USB 保持连接, 不等同于脱线验收.
+- 原始系统日志由用户保留在本机临时目录, 未加入仓库. 后续须以 AL 自有通道的分步启动及真实开发者握手为依据, 不把历史 LocalDevVPN 成功记录当成当前离线冷启动成功.
+- 用户在系统设置先用蜂窝连接 AL 自有 VPN, 再关闭蜂窝并点击蜂窝修改, 确认定位成功. run `2159B60F-4C55-4CE3-814A-0962A12A7F0E` 的预检 `path=satisfied, interfaces=other`, 7 个隧道阶段及 DVT 全部通过, 242ms 时 set 成功, 之后约每 4 秒重发成功. 当前证据包含 USB, 没有代替脱线与长期保持验收.
+- App 调整为先准备本机 VPN, 用户关闭蜂窝后再继续定位. 准备及取消不调用开发者服务或 set/clear, 切后台保留已准备通道, 原默认路径仍先确认本机 VPN 关闭. 不改隧道地址、路由、签名权限或配对.
+- `sh scripts/check.sh` 全部通过, 最终取消提示修订的 AppState 检查再次通过, Debug build、strict codesign、覆盖安装和启动通过. 用户确认新版两步 UI 定位成功. `E62B3C12-8781-4D11-B6B8-2B49A357B151` 在159ms完成 VPN 准备且没有开发者指令; 约8秒后用户继续, `2F11CAF9-A9E0-4CDD-AFAF-028895C28C67` 复用 connected 通道, 预检 interfaces=other, 257ms set成功, 后续至少约30秒保持重发成功. USB仍连接; 未验收脱线长期保持. 未提交推送.
+
+## 2026-09-17 用户离线启动失败后的诊断修订
+
+- 用户截图显示配置已经创建, 蜂窝关闭且 Wi-Fi 未连接时本机 VPN 启动失败. USB 只读取得旧版诊断: run `0B846867-30F4-457F-BEED-4C1759A55452` 约 10.14 秒超时, 未进入开发者握手或发送定位指令. 同组 run `544141C4-4EC8-4714-9EBD-9AD0D1ABAED7` 曾在蜂窝路径下启动 VPN, 随后开发者预检失败. 不能将扩展无法运行或未授权认定为根因.
+- 旧版把系统错误统一替换成授权提示. 本次保留配置/启动阶段, 状态变化, 脱敏系统 domain/code, 并在停止清理前获取最近断开错误. 弹窗明确尚未发送定位指令. 不改变通道配置或 Wi-Fi 流程.
+- Debug build 和严格签名校验通过. `sh scripts/check.sh` 在允许本机 listener 的权限下通过, 新断言检查错误细节显示且不误报授权. 沙箱内首次网络检查因监听权限失败, 不是回归失败.
+- 无 LocalTunnel 匹配崩溃文件. 历史 VPN 系统日志导出需要本机 sudo 认证, 已请用户执行只读命令. 离线启动根因仍待该证据; 未代用户操作网络或真机定位测试.
+
+## 2026-09-17 17:57-17:59 AL 户外本机通道
+
+- 用户调整目标: Wi-Fi 下保留 Shadowrocket + AL 原流程; 户外允许手动关闭小火箭和蜂窝, AL 自带本机 VPN 完成定位后再由用户恢复蜂窝. 不做自动系统开关或快捷指令, UI 只增加蜂窝修改按钮, 操作弹窗和活动会话提示.
+- 新增 LocalTunnel Packet Tunnel extension 和 LocalDeviceTunnel manager. 仅接管固定10.7.0.1/32开发者peer, 校验IPv4长度/协议/地址后交换源目的地址回注; 无外网服务或DNS接管. 主App保留原Bundle ID, 增加Packet Tunnel entitlement并嵌入已签名扩展.
+- AppState区分默认和户外通道. 活动户外会话换点复用, 清除或失败停止本机通道; 已有默认会话禁止直接切换到户外. 默认新建会话前确认本App通道已停止, 不创建或改动小火箭配置. 尚未创建本机VPN配置视为已停止, 防止首次安装影响原流程.
+- `sh scripts/check.sh`通过, 包含原功能回归, 户外路径选择/换点/清除/失败/切换, 固定IPv4双向反射和无效包拒绝. 最终Debug签名build及主包/appex严格codesign通过, 已覆盖安装至原物理iPhone.
+- 17:57:33安装后Wi-Fi真实check-native run `29055E50-0262-4D35-B2E4-1CA9CB51907F`: 全部FFI阶段及DVT服务通过, 1140ms结束. UDP144/auth143/reflected143/rejected0, SYNACK49152=1/RST49152=0. 未发送set/clear.
+- 17:59镜像UI核对: 原开启模拟定位按钮保留, 新蜂窝修改位于其下方, 操作弹窗完整显示. 在当前Wi-Fi条件确认户外入口, 明确提示先断开Wi-Fi并关闭小火箭/蜂窝, 未启动本机VPN或设置定位.
+- 用户随后明确由自己负责真机测试, 已停止手机操作. 待用户验收: 首次系统VPN授权, 无Wi-Fi且蜂窝关闭时本机通道/完整握手/set, 实际换点/clear, 恢复蜂窝后的新鲜定位与普通外网, 脱USB及后台保持. 构建/安装/Wi-Fi回归不等于这些项通过. 配对/Places/Keychain保留, 未提交推送.
+
+## 2026-09-17 16:56-17:08 native 分层诊断与蜂窝对照
+
+- 固定 idevice commit 上新增同步阶段回调, 保留原 API, 超时, error code/sub_code 和资源所有权. 分开记录初始 TCP, RPPairing, listener 创建, 动态 TCP, TLS-PSK/CDTunnel, Adapter TCP 和首次 RSD handshake. 日志只含固定阶段和当前 attempt, 不包含原始 peer 数据.
+- 新增 DEBUG `check-native` URL 入口, 明确指定合并 App Bundle ID 启动. 仅执行一次真实连接并关闭会话, 不额外探测 TCP, 不发送 set/clear. 正常 UI 检测仍保留预检测.
+- `sh scripts/check.sh` 通过, 新检查覆盖阶段 2/7 的 EOF 归因, 原始错误脱敏, 失败后恢复, 诊断入口不发送定位命令且跳过额外探测. 最终 native 重建, Debug Xcode build, `codesign --verify --deep --strict` 和 `git diff --check` 通过. 沿用原 Bundle ID 覆盖安装, 未提交推送.
+- 系统 VPN 页面直接确认 Shadowrocket 已连接, Personal VPN 未连接. 16:56:11 的 Wi-Fi 基线 run `C1590AAD-FA21-4473-964F-A5E064EA5BF9`: 全部 7 个内部阶段通过, RemoteServer 和 DVT LocationSimulation 服务通过, 约 1.15 秒后检查结束. 成功快照 UDP142/auth141/reflected141/rejected0, SYNACK49152=1, RST49152=0. 未发送 set/clear.
+- 17:04:36 纯蜂窝, 无镜像, USB连接且App解锁前台, run `2325CCC9-B234-4A7A-A2E7-FBCE176BAC62`: 用户确认SR开/IKE关, 日志wifiAddress=false. 初始TCP累计68ms报告成功, RPPairing累计89ms以EOF失败(code1/sub0), 后续listener/TLS/RSD/DVT均未开始. 零起始计数下UDP3/auth2/reflected2/rejected0, SYNother=1/RST49152=1/SYNACK=0, 162ms结束. 客户端connect成功不能证明系统开发者TCP入口已接受连接.
+- 17:08:55 只恢复Wi-Fi, 继续无镜像和同一USB/App/配对/SR, run `831B2C3C-FE58-4FF9-A42D-FA72953A721D`: 全部握手阶段和DVT服务通过, 1076ms结束, UDP153/auth152/reflected152/rejected0/SYNACK49152=1/RST49152=0. Console当前同轮C18(49152), L5(TLS listener), C19(TLS连接)均含 `prohibited types: cellular loopback`.
+- 根因高度指向系统开发者服务的网络路径准入限制. 直接确认的是RPPairing未完成且后续阶段未开始; 反射后开发者TCP入口未完成建连是单次计数支持的高置信推断, 尚缺完整逐流关联及具体listener/内核拒收分支证据. Console在纯蜂窝时断开, 不用无关旧连接超时补齐缺失证据. 已停止临时采集, Wi-Fi恢复, IKE未启动, 配对/SR配置未改, 全程无set/clear. 原条件下尚无已验证配置修复, 下一步只接受能改变服务接入路径的具体新机制.
+- 详细假设, 已失败路线和外部复核材料见 [CELLULAR_REVIEW_BRIEF.md](CELLULAR_REVIEW_BRIEF.md).
+
 ## 2026-09-17 15:24-15:28 定位与 IKEv2 App 合并
 
 - 用户要求先合并两个 App. 原主 App 标识再次被 Apple 返回不可注册, 通配符 profile 缺少 Personal VPN 权限. 改为沿用已有 IKEv2Lab 标识升级完整 App, 保留原 VPN 配置和 Keychain 身份, 显示名称为 Aurora Location.

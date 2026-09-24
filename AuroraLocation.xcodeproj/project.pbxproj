@@ -9,7 +9,40 @@
 /* Begin PBXFileReference section */
 		A00000000000000000000006 /* AuroraLocation.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AuroraLocation.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000017 /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+		B00000000000000000000001 /* LocalTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LocalTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000002 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		B00000000000000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B00000000000000000000004 /* LocalTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LocalTunnel.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXBuildFile section */
+		B00000000000000000000005 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* PacketTunnelProvider.swift */; };
+		B00000000000000000000006 /* LocalTunnel.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B00000000000000000000001 /* LocalTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B00000000000000000000007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B00000000000000000000008;
+			remoteInfo = LocalTunnel;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B00000000000000000000009 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B00000000000000000000006 /* LocalTunnel.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		A00000000000000000000016 /* Exceptions for "AuroraLocation" folder in "AuroraLocation" target */ = {
@@ -41,6 +74,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B00000000000000000000011 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -49,6 +89,7 @@
 			children = (
 				A00000000000000000000017 /* Config.xcconfig */,
 				A00000000000000000000005 /* AuroraLocation */,
+				B00000000000000000000010 /* LocalTunnel */,
 				A00000000000000000000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -57,8 +98,19 @@
 			isa = PBXGroup;
 			children = (
 				A00000000000000000000006 /* AuroraLocation.app */,
+				B00000000000000000000001 /* LocalTunnel.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B00000000000000000000010 /* LocalTunnel */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000002 /* PacketTunnelProvider.swift */,
+				B00000000000000000000003 /* Info.plist */,
+				B00000000000000000000004 /* LocalTunnel.entitlements */,
+			);
+			path = LocalTunnel;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -71,10 +123,12 @@
 				A00000000000000000000007 /* Sources */,
 				A00000000000000000000008 /* Frameworks */,
 				A00000000000000000000009 /* Resources */,
+				B00000000000000000000009 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B00000000000000000000012 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A00000000000000000000005 /* AuroraLocation */,
@@ -83,6 +137,23 @@
 			productName = AuroraLocation;
 			productReference = A00000000000000000000006 /* AuroraLocation.app */;
 			productType = "com.apple.product-type.application";
+		};
+		B00000000000000000000008 /* LocalTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B00000000000000000000013 /* Build configuration list for PBXNativeTarget "LocalTunnel" */;
+			buildPhases = (
+				B00000000000000000000014 /* Sources */,
+				B00000000000000000000011 /* Frameworks */,
+				B00000000000000000000015 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LocalTunnel;
+			productName = LocalTunnel;
+			productReference = B00000000000000000000001 /* LocalTunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -97,6 +168,9 @@
 						SystemCapabilities = {
 							com.apple.VPNLite = { enabled = 1; };
 						};
+					};
+					B00000000000000000000008 = {
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -115,12 +189,20 @@
 			projectRoot = "";
 			targets = (
 				A00000000000000000000002 /* AuroraLocation */,
+				B00000000000000000000008 /* LocalTunnel */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A00000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B00000000000000000000015 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -137,7 +219,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B00000000000000000000014 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000005 /* PacketTunnelProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B00000000000000000000012 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B00000000000000000000008 /* LocalTunnel */;
+			targetProxy = B00000000000000000000007 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A00000000000000000000012 /* Debug */ = {
@@ -255,6 +353,48 @@
 			};
 			name = Release;
 		};
+		B00000000000000000000016 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A00000000000000000000017 /* Config.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LocalTunnel/LocalTunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LocalTunnel/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.auroraleelabs.AuroraLocation.IKEv2Lab.LocalTunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		B00000000000000000000017 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = A00000000000000000000017 /* Config.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LocalTunnel/LocalTunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LocalTunnel/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.auroraleelabs.AuroraLocation.IKEv2Lab.LocalTunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -272,6 +412,15 @@
 			buildConfigurations = (
 				A00000000000000000000014 /* Debug */,
 				A00000000000000000000015 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B00000000000000000000013 /* Build configuration list for PBXNativeTarget "LocalTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B00000000000000000000016 /* Debug */,
+				B00000000000000000000017 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

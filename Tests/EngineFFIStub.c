@@ -5,10 +5,12 @@
 // Test the Swift owner's lifetime against the real FFI declarations, without a device.
 static int counts[8];
 static int fail_set;
+static uint32_t fail_tunnel_stage;
 int aurora_test_count(int index) { assert(index >= 0 && index < 8); return counts[index]; }
 void aurora_test_fail_set(void) { fail_set = 1; }
 void aurora_test_fail_eof(void) { fail_set = 2; }
 void aurora_test_fail_connect(void) { fail_set = 3; }
+void aurora_test_fail_tunnel_stage(uint32_t stage) { assert(stage >= 1 && stage <= 7); fail_tunnel_stage = stage; }
 void idevice_set_global_timeout(uint64_t seconds) { assert(seconds > 0); }
 struct IdeviceFfiError *rp_pairing_file_read(const char *path, struct RpPairingFileHandle **out) {
     assert(path); *out = malloc(1); return NULL;
@@ -20,6 +22,24 @@ struct IdeviceFfiError *tunnel_create_rppairing(const idevice_sockaddr *address,
     struct RsdHandshakeHandle **handshake) {
     assert(address && length && hostname && pairing && !callback && !context);
     counts[0]++; *adapter = malloc(1); *handshake = malloc(1); return NULL;
+}
+struct IdeviceFfiError *aurora_tunnel_create_rppairing_with_progress(const idevice_sockaddr *address,
+    idevice_socklen_t length, const char *hostname, struct RpPairingFileHandle *pairing,
+    const char *(*callback)(void *), void *context, struct AdapterHandle **adapter,
+    struct RsdHandshakeHandle **handshake, void (*progress)(uint32_t, bool)) {
+    assert(progress && !*adapter && !*handshake);
+    for (uint32_t stage = 1; stage <= 7; stage++) {
+        progress(stage, false);
+        if (stage == fail_tunnel_stage) {
+            fail_tunnel_stage = 0;
+            struct IdeviceFfiError *error = calloc(1, sizeof(struct IdeviceFfiError));
+            error->code = 42; error->sub_code = 7;
+            error->message = "Socket(Custom { kind: UnexpectedEof, error: PRIVATE_PEER_DATA })";
+            return error;
+        }
+        progress(stage, true);
+    }
+    return tunnel_create_rppairing(address, length, hostname, pairing, callback, context, adapter, handshake);
 }
 struct IdeviceFfiError *remote_server_connect_rsd(struct AdapterHandle *adapter,
     struct RsdHandshakeHandle *handshake, struct RemoteServerHandle **server) {

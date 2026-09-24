@@ -13,6 +13,7 @@ Aurora Location 是面向个人 iPhone 修改定位工具. 它以 SwiftUI 和 Ma
 - 本地收藏和最多 20 条去重的最近位置.
 - 严格校验的 `auroralocation` URL Scheme, 中文错误提示和脱敏诊断.
 - 为 Shadowrocket 导出设备生成的本地 WireGuard peer 配置和分流模块.
+- 独立的蜂窝修改按钮, 使用 AL 内置本机 VPN, 附带每次可查看的手动离线启动提示. 不提供外网代理.
 - 可选的原生 IKEv2 Personal VPN 共存实验入口, 不代表蜂窝定位已修复.
 
 `最近操作` 只表示指令在 App 端完成, 不代表系统仍在模拟定位. 每次启动的状态均为未知, 请用 Apple Maps 或目标测试 App 人工验证.
@@ -35,7 +36,7 @@ sh scripts/check.sh
 
 `scripts/check.sh` 运行 URL/坐标和本地存储模型检查, FFI 会话 stub 检查和 plist lint. 它不是设备协议或模拟定位验收.
 
-在 Xcode 打开 `AuroraLocation.xcodeproj`, 选择 `AuroraLocation` scheme. 在 `Signing & Capabilities` 中选择自己的 Developer Team, 使用 `Automatically manage signing`, 并改为自己唯一的 Bundle ID. 签名需包含 Personal VPN 能力, 通配符 profile 不足以支持新增实验功能. 仓库不包含 Team ID, signing certificate 或 provisioning profile. 如需本机 Team 配置, 创建未纳入 Git 的 `Signing.xcconfig`, 项目已有可选 include.
+在 Xcode 打开 `AuroraLocation.xcodeproj`, 选择 `AuroraLocation` scheme. 在 `Signing & Capabilities` 中选择自己的 Developer Team, 使用 `Automatically manage signing`, 并改为自己唯一的 Bundle ID, 同步修改内嵌 LocalTunnel 的 Bundle ID 前缀. 签名需包含 Personal VPN 和 Network Extensions 的 Packet Tunnel 能力, 通配符 profile 不足以支持这些功能. 仓库不包含 Team ID, signing certificate 或 provisioning profile. 如需本机 Team 配置, 创建未纳入 Git 的 `Signing.xcconfig`, 项目已有可选 include.
 
 可做无签名 device build:
 
@@ -47,6 +48,31 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 ```
 
 随后连接并解锁设备, 开启 Developer Mode, 在 Xcode 选择设备并 Run. 签名、安装或启动成功只能证明安装链路, 不能证明 `set` 或 `clear` 已改变系统定位.
+
+## Aurora VPN 联动
+
+在设置中选择 `Aurora VPN` 连接方式. 独立 Aurora VPN 同时提供外网代理和本机开发者通道, Location 继续管理配对与定位. 原 Shadowrocket/LocalTunnel 方式保留为回退.
+
+- Wi-Fi 下直接启动定位, Location 唤起 Aurora VPN 并校验真实开发者握手.
+- 蜂窝首次建连使用下面的蜂窝助手流程, 先连接 Aurora VPN, 临时关闭蜂窝建立会话, 再恢复蜂窝.
+- Wi-Fi 已建立的定位会话可直接切换到蜂窝. 2026-09-24 用户已确认会话保持, 且两种网络下定位和代理均可用. 正常时不需重连; 保持中断或换点失败时再走蜂窝重建流程.
+- 清除定位、取消或失败均不停止外部 Aurora VPN. App 重启不自动重放定位指令.
+
+详见 [开发历程与经验](docs/JOURNEY.md) 和 [测试计划](docs/TEST_PLAN.md). 双网络成功不代表任意锁屏时长或节点故障场景均已验收.
+
+## 户外蜂窝修改
+
+以下流程同时支持现有本机通道和 Aurora VPN 外部模式. Wi-Fi 下使用原通道时, 开启小火箭后使用 `开启模拟定位`.
+
+户外使用已有配对和选中坐标:
+
+1. 先选好目标位置, 搜索和地图加载需要网络; 离线也可使用已保存位置或手工坐标.
+2. 首次点 `蜂窝修改`, 安装随 App 提供的 `Aurora 蜂窝助手 2`, 保留此名称. 允许运行快捷指令和添加 AL 本机 VPN 的系统提示. 旧助手与 v2 不兼容.
+3. 后续点 `蜂窝修改`, App 通过快捷指令关闭 Wi-Fi, 开启蜂窝并准备 VPN, 然后临时关闭蜂窝, 发送定位指令, 最后恢复蜂窝. 流程会在 App 和快捷指令之间切换.
+4. 定位失败或取消后也请求恢复蜂窝. 恢复未完成会显示 `恢复蜂窝`; App 重启只恢复网络, 不重放定位指令. 强制结束 App 后如蜂窝仍关闭, 可在控制中心开启.
+5. 已有户外会话可再次点蜂窝修改换点. 结束时点 `恢复真实定位`. 设置中的手动方式保留原有两步启动流程.
+
+蜂窝开关由用户安装的系统快捷指令执行, AL 本身不使用私有网络开关 API. 当前设备完全断网时系统会拒绝新建 VPN, 必须先建立通道再关闭蜂窝. 两步和一键流程已有用户成功反馈; 脱 USB 后长期保持须单独验收, VPN 显示已连接不代表定位成功.
 
 ## 配置 Shadowrocket 本地 WireGuard 节点
 

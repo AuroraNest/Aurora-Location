@@ -83,6 +83,22 @@ The archive contains only the arm64 iOS slice. Rust archives are not promised to
 be byte-for-byte identical across paths or later toolchain/SDK versions; source,
 lock and patch hashes establish the reproducible input.
 
+Rebuilt on 2026-09-17 with the same pinned source, Xcode 27.0, iPhoneOS 27.0 SDK,
+and Rust 1.93.1 after adding the synchronous tunnel-stage callback ABI:
+
+```text
+735ead5f87f6b44b2ba033abfef3159e0d27dbf7a1bad44da4a305378e4f1131  Cargo.lock
+01d7f11701c83ee9e3167bd9376ea2aa9ae70b6bef84f97f651154b6a72c79e0  aurora-ios.patch
+6c42d428dd8a820d5ab073d472c41d1d10aa4cb62fcd609848bdff6b72e5506d  idevice.h
+eacd72e90c4ce5531e7f8a59e90d2afb7e6cc8f45412729b63ac0839d1a00874  libidevice_ffi.a
+d98e25796e1135d892d81e6922a61e78e82b3d6c33322112e9eca1e089c7a300  module.modulemap
+```
+
+This rebuild verified the arm64 slice and both `tunnel_create_rppairing` and
+`aurora_tunnel_create_rppairing_with_progress` symbols. The new callback is an
+optional direct C function pointer receiving only `(uint32_t stage, bool completed)`;
+its invocation and lifetime rules are documented in the generated declaration.
+
 ## Validation record
 
 - Host `cargo check --offline --locked` passed for the exact feature set.

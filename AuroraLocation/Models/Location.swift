@@ -69,6 +69,8 @@ enum AuroraLocationError: String, LocalizedError, Sendable {
     case pairingMissing, pairingInvalid, pairingFailed, pairingCancelled, pairingSaveFailed
     case wifiRequired, tunnelStartFailed, tunnelUnavailable, dvtConnectionFailed, developerImageUnavailable
     case locationSimulationFailed, clearSimulationFailed, storageFailed
+    case outdoorNetworkActive, localTunnelFailed, localTunnelStopFailed
+    case auroraVPNOpenFailed, auroraVPNCancelled, auroraVPNFailed, auroraVPNTimeout
 
     var errorDescription: String? {
         switch self {
@@ -88,6 +90,13 @@ enum AuroraLocationError: String, LocalizedError, Sendable {
         case .locationSimulationFailed: return "设置指令未完成. 系统定位状态未知, 请重试或恢复真实定位."
         case .clearSimulationFailed: return "恢复指令未完成. 系统定位状态未知, 请检查 Shadowrocket 本机连接后重试."
         case .storageFailed: return "本地数据读写失败. 已有数据未被覆盖, 请检查设备存储空间."
+        case .outdoorNetworkActive: return "检测到 Wi-Fi 接口地址. 户外模式请先断开 Wi-Fi 和小火箭, 保持蜂窝开启并点击蜂窝修改. 本机 VPN 连接后再关闭蜂窝继续. Wi-Fi 下继续使用原来的开启模拟定位."
+        case .localTunnelFailed: return "AL 本机通道未能启动, 尚未发送定位指令."
+        case .localTunnelStopFailed: return "AL 本机 VPN 尚未确认关闭. 请在系统设置中断开 Aurora Location 本机通道后重试."
+        case .auroraVPNOpenFailed: return "无法打开 Aurora VPN. 请确认已安装 Aurora VPN."
+        case .auroraVPNCancelled: return "Aurora VPN 连接已取消, 尚未发送定位指令."
+        case .auroraVPNFailed: return "Aurora VPN 未能准备连接. 请在 Aurora VPN 中检查节点配置和连接状态."
+        case .auroraVPNTimeout: return "等待 Aurora VPN 连接超时, 尚未发送定位指令."
         }
     }
 }

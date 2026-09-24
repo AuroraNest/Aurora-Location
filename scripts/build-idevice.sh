@@ -115,6 +115,7 @@ for symbol in \
     rp_pairing_file_from_bytes \
     rp_pairing_file_to_bytes \
     tunnel_create_rppairing \
+    aurora_tunnel_create_rppairing_with_progress \
     remote_server_connect_rsd \
     location_simulation_new \
     location_simulation_set \

@@ -9,6 +9,7 @@ enum NetworkStatus {
 @_silgen_name("aurora_test_fail_set") private func failNextSet()
 @_silgen_name("aurora_test_fail_eof") private func failNextEOF()
 @_silgen_name("aurora_test_fail_connect") private func failNextConnect()
+@_silgen_name("aurora_test_fail_tunnel_stage") private func failNextTunnelStage(_ stage: UInt32)
 
 @main
 struct EngineSessionCheck {
@@ -59,6 +60,22 @@ struct EngineSessionCheck {
         let refused = await LocationEngine.lastFailureDetails()
         assert(refused.contains("stage pairing-tcp") && refused.contains("连接被拒绝"))
         assert(!refused.contains("PRIVATE_PEER_DATA"))
+        for (stage, name) in [(UInt32(2), "pairing-verify"), (UInt32(7), "rsd-handshake")] {
+            DiagnosticLog.begin("native-stage-check")
+            failNextTunnelStage(stage)
+            do {
+                try await LocationEngine.perform(nil, pairingPath: path)
+                assertionFailure("Expected tunnel stage failure")
+            } catch { assert(error as? AuroraLocationError == .tunnelUnavailable) }
+            let failure = await LocationEngine.lastFailureDetails()
+            assert(failure.contains("stage \(name)") && failure.contains("连接提前关闭"))
+            assert(failure.contains("code 42, sub 7") && !failure.contains("PRIVATE_PEER_DATA"))
+            let trace = DiagnosticLog.report()
+            assert(trace.contains("tunnel.\(name).begin") && trace.contains("tunnel.\(name).failed"))
+        }
+        try await LocationEngine.perform(nil, pairingPath: path)
+        let recoveredFailure = await LocationEngine.lastFailureDetails()
+        assert(recoveredFailure == "")
         let trace = DiagnosticLog.report()
         assert(trace.contains("tunnel.create-rppairing.ok") && trace.contains("dvt.set.failed"))
         assert(!trace.contains("PRIVATE_PEER_DATA") && !trace.contains(path))

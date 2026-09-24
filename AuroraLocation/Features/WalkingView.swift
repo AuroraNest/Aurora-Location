@@ -70,9 +70,14 @@ struct WalkingView: View {
             }
             .overlay {
                 if isPlanning || (state.isBusy && !state.isWalkingSessionActive) {
-                    ProgressView(isPlanning ? "正在规划步行路线" : "正在开始模拟步行")
-                        .padding()
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    VStack(spacing: 12) {
+                        ProgressView(isPlanning ? "正在规划步行路线" : "正在开始模拟步行")
+                        if state.canCancelAuroraVPN {
+                            Button("取消连接") { state.cancelAuroraVPNConnection() }
+                        }
+                    }
+                    .padding()
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
         }

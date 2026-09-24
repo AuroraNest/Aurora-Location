@@ -602,10 +602,160 @@ index 399db10..1609546 100644
      }
  
 diff --git a/ffi/src/tunnel_provider.rs b/ffi/src/tunnel_provider.rs
-index 58dd1f8..0ab7ea1 100644
+index 58dd1f8..85388e7 100644
 --- a/ffi/src/tunnel_provider.rs
 +++ b/ffi/src/tunnel_provider.rs
-@@ -324,17 +324,20 @@ pub unsafe extern "C" fn tunnel_create_rppairing(
+@@ -29,6 +29,24 @@ struct PinCtx(*mut c_void);
+ unsafe impl Send for PinCtx {}
+ unsafe impl Sync for PinCtx {}
+
++const TUNNEL_STAGE_PAIRING_TCP: u32 = 1;
++const TUNNEL_STAGE_PAIRING_VERIFY: u32 = 2;
++const TUNNEL_STAGE_LISTENER_CREATE: u32 = 3;
++const TUNNEL_STAGE_TUNNEL_TCP: u32 = 4;
++const TUNNEL_STAGE_TLS_PSK: u32 = 5;
++const TUNNEL_STAGE_ADAPTER_CONNECT: u32 = 6;
++const TUNNEL_STAGE_RSD_HANDSHAKE: u32 = 7;
++
++fn report_tunnel_progress(
++    callback: Option<extern "C" fn(stage: u32, completed: bool)>,
++    stage: u32,
++    completed: bool,
++) {
++    if let Some(callback) = callback {
++        callback(stage, completed);
++    }
++}
++
+ /// Shared logic: given a connected & paired `RemotePairingClient`, create
+ /// the TLS-PSK tunnel and return adapter + handshake.
+ async fn finish_tunnel(
+@@ -36,16 +54,22 @@ async fn finish_tunnel(
+         impl idevice::remote_pairing::RpPairingSocketProvider,
+     >,
+     connect_addr: std::net::SocketAddr,
++    progress_callback: Option<extern "C" fn(stage: u32, completed: bool)>,
+ ) -> Result<(idevice::tcp::handle::AdapterHandle, RsdHandshake), IdeviceError> {
+     use idevice::remote_pairing::connect_tls_psk_tunnel_native;
+
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_LISTENER_CREATE, false);
+     let tunnel_port = rpc.create_tcp_listener().await?;
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_LISTENER_CREATE, true);
+     let mut tunnel_addr = connect_addr;
+     tunnel_addr.set_port(tunnel_port);
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_TUNNEL_TCP, false);
+     let tunnel_stream = run_global_timeout(|| tokio::net::TcpStream::connect(tunnel_addr))
+         .await
+         .map_err(|e| IdeviceError::InternalError(format!("TLS tunnel: {e}")))?;
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_TUNNEL_TCP, true);
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_TLS_PSK, false);
+     let tunnel = connect_tls_psk_tunnel_native(tunnel_stream, rpc.encryption_key()).await?;
+
+     let client_ip: std::net::IpAddr = tunnel
+         .info
+@@ -61,6 +85,8 @@ async fn finish_tunnel(
+     let rsd_port = tunnel.info.server_rsd_port;
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_TLS_PSK, true);
+
+     let raw = tunnel.into_inner();
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_ADAPTER_CONNECT, false);
+     let mut adapter = idevice::tcp::adapter::Adapter::new(Box::new(raw), client_ip, server_ip);
+     adapter.set_mss(mtu.saturating_sub(60));
+     let mut adapter = adapter.to_async_handle();
+@@ -69,7 +95,10 @@ async fn finish_tunnel(
+         .connect(rsd_port)
+         .await
+         .map_err(|e| IdeviceError::InternalError(format!("{e}")))?;
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_ADAPTER_CONNECT, true);
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_RSD_HANDSHAKE, false);
+     let handshake = RsdHandshake::new(rsd_stream).await?;
++    report_tunnel_progress(progress_callback, TUNNEL_STAGE_RSD_HANDSHAKE, true);
+
+     Ok((adapter, handshake))
+ }
+@@ -265,7 +294,7 @@ pub unsafe extern "C" fn tunnel_create_remotexpc(
+         rpc.connect(rpf, async || get_pin(pin_callback, &ctx))
+             .await?;
+
+-        finish_tunnel(&mut rpc, socket_addr).await
++        finish_tunnel(&mut rpc, socket_addr, None).await
+     });
+
+     match res {
+@@ -279,6 +308,41 @@ pub unsafe extern "C" fn tunnel_create_remotexpc(
+
+ /// Creates a tunnel over the network via raw RPPairing protocol.
+ ///
++/// This preserves the original ABI and delegates to
++/// [`aurora_tunnel_create_rppairing_with_progress`] without a progress callback.
++/// See that function for the connection flow and ownership requirements.
++///
++/// # Safety
++/// All pointer arguments must be valid and non-null (except `pin_callback`/`pin_context`).
++/// `pairing_file` is borrowed, not consumed.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn tunnel_create_rppairing(
++    addr: *const idevice_sockaddr,
++    addr_len: idevice_socklen_t,
++    hostname: *const c_char,
++    pairing_file: *mut RpPairingFileHandle,
++    pin_callback: Option<extern "C" fn(context: *mut c_void) -> *const c_char>,
++    pin_context: *mut c_void,
++    out_adapter: *mut *mut AdapterHandle,
++    out_handshake: *mut *mut RsdHandshakeHandle,
++) -> *mut IdeviceFfiError {
++    unsafe {
++        aurora_tunnel_create_rppairing_with_progress(
++            addr,
++            addr_len,
++            hostname,
++            pairing_file,
++            pin_callback,
++            pin_context,
++            out_adapter,
++            out_handshake,
++            None,
++        )
++    }
++}
++
++/// Creates a raw RPPairing tunnel and reports its synchronous connection stages.
++///
+ /// Use this when connecting to a device discovered via `_remotepairing._tcp`.
+ /// The connection goes: direct TCP → RPPairing (JSON) → tunnel.
+ ///
+@@ -289,11 +353,19 @@ pub unsafe extern "C" fn tunnel_create_remotexpc(
+ /// generated.
+ ///
+ ///
++/// `progress_callback`, when non-null, is called synchronously before each stage
++/// with `completed=false`, then with `completed=true` only after that stage succeeds.
++/// The callback receives only the fixed stage IDs: 1 pairing TCP, 2 pairing verify,
++/// 3 listener creation, 4 tunnel TCP, 5 TLS-PSK and CDTunnel handshake, 6 adapter
++/// creation and RSD-port connect, and 7 RSD handshake. It receives no network
++/// addresses, keys, payloads, or error values. All callbacks finish before this
++/// function returns; the callback must remain valid for the duration of this call.
++///
+ /// # Safety
+-/// All pointer arguments must be valid and non-null (except `pin_callback`/`pin_context`).
+-/// `pairing_file` is borrowed, not consumed.
++/// All pointer arguments must be valid and non-null (except `pin_callback`,
++/// `pin_context`, and `progress_callback`). `pairing_file` is borrowed, not consumed.
+ #[unsafe(no_mangle)]
+-pub unsafe extern "C" fn tunnel_create_rppairing(
++pub unsafe extern "C" fn aurora_tunnel_create_rppairing_with_progress(
+     addr: *const idevice_sockaddr,
+     addr_len: idevice_socklen_t,
+     hostname: *const c_char,
+@@ -302,6 +374,7 @@ pub unsafe extern "C" fn tunnel_create_rppairing(
+     pin_context: *mut c_void,
+     out_adapter: *mut *mut AdapterHandle,
+     out_handshake: *mut *mut RsdHandshakeHandle,
++    progress_callback: Option<extern "C" fn(stage: u32, completed: bool)>,
+ ) -> *mut IdeviceFfiError {
+     if addr.is_null()
+         || hostname.is_null()
+@@ -324,17 +397,24 @@ pub unsafe extern "C" fn tunnel_create_rppairing(
      let ctx = PinCtx(pin_context);
  
      let res = run_sync_local(async {
@@ -622,16 +772,20 @@ index 58dd1f8..0ab7ea1 100644
 -        finish_tunnel(&mut rpc, socket_addr).await
 +        run_global_timeout(|| async {
 +            // Connect directly and use raw RPPairing protocol
++            report_tunnel_progress(progress_callback, TUNNEL_STAGE_PAIRING_TCP, false);
 +            let stream = tokio::net::TcpStream::connect(socket_addr)
 +                .await
 +                .map_err(|e| IdeviceError::InternalError(format!("connect: {e}")))?;
++            report_tunnel_progress(progress_callback, TUNNEL_STAGE_PAIRING_TCP, true);
 +            let conn = RpPairingSocket::new(stream);
 +
 +            let mut rpc = RemotePairingClient::new(conn, &host);
++            report_tunnel_progress(progress_callback, TUNNEL_STAGE_PAIRING_VERIFY, false);
 +            rpc.connect(rpf, async || get_pin(pin_callback, &ctx))
 +                .await?;
++            report_tunnel_progress(progress_callback, TUNNEL_STAGE_PAIRING_VERIFY, true);
 +
-+            finish_tunnel(&mut rpc, socket_addr).await
++            finish_tunnel(&mut rpc, socket_addr, progress_callback).await
 +        })
 +        .await
      });

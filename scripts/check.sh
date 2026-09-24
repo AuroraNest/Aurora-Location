@@ -23,14 +23,22 @@ xcrun swiftc -module-cache-path "$test_dir/cache" \
   AuroraLocation/Core/OpenStreetMapWalkingRoute.swift \
   Tests/WalkingRouteCheck.swift -o "$test_dir/walking-route-check"
 "$test_dir/walking-route-check"
-xcrun swiftc -module-cache-path "$test_dir/cache" \
+xcrun swiftc -D DEBUG -module-cache-path "$test_dir/cache" \
   AuroraLocation/Models/Location.swift AuroraLocation/Models/WalkingRoute.swift \
   AuroraLocation/App/AppState.swift Tests/AppStateWalkingCheck.swift \
+  AuroraLocation/Core/CellularShortcut.swift AuroraLocation/Core/AuroraVPN.swift \
   -o "$test_dir/walking-state-check"
 "$test_dir/walking-state-check"
+xcrun swiftc -module-cache-path "$test_dir/cache" \
+  AuroraLocation/Core/AuroraVPN.swift Tests/AuroraVPNCheck.swift -o "$test_dir/aurora-vpn-check"
+"$test_dir/aurora-vpn-check"
 xcrun swiftc -module-cache-path "$test_dir/cache" \
   AuroraLocation/Core/PersonalVPN.swift Tests/PersonalVPNCheck.swift \
   -o "$test_dir/personal-vpn-check"
 "$test_dir/personal-vpn-check"
+xcrun swiftc -module-cache-path "$test_dir/cache" \
+  LocalTunnel/PacketTunnelProvider.swift Tests/LocalTunnelPacketCheck.swift \
+  -o "$test_dir/local-tunnel-check"
+"$test_dir/local-tunnel-check"
 plutil -lint AuroraLocation/Resources/Info.plist AuroraLocation/Resources/AuroraLocation.entitlements \
-  AuroraLocation.xcodeproj/project.pbxproj
+  LocalTunnel/Info.plist LocalTunnel/LocalTunnel.entitlements AuroraLocation.xcodeproj/project.pbxproj
