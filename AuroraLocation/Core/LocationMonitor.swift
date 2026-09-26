@@ -9,14 +9,8 @@ final class LocationMonitor: NSObject, ObservableObject, @preconcurrency CLLocat
     private let manager = CLLocationManager()
     private var target: Coordinate?
 
-    func recordDebugEvent(_ event: String) {
-        DiagnosticLog.event(event)
-        #if DEBUG
-        let defaults = UserDefaults.standard
-        var events = defaults.stringArray(forKey: "locationDebugEvents") ?? []
-        events.append("\(Date().timeIntervalSince1970) \(event) enabled=\(isEnabled) auth=\(manager.authorizationStatus.rawValue) target=\(target != nil)")
-        defaults.set(Array(events.suffix(40)), forKey: "locationDebugEvents")
-        #endif
+    func recordDebugEvent(_ event: @autoclosure () -> String) {
+        DiagnosticLog.event("\(event()) enabled=\(isEnabled) auth=\(manager.authorizationStatus.rawValue) target=\(target != nil)")
     }
 
     override init() {

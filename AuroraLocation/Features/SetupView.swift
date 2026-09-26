@@ -140,12 +140,16 @@ struct SetupView: View {
                 Section("诊断") {
                     Toggle("记录详细诊断", isOn: $detailedDiagnostics)
                     ShareLink("导出诊断报告", item: state.diagnostics)
-                    Text("诊断内容已脱敏, 不包含 PIN 或配对凭据.")
+                    Text("默认关闭. 排障时手动开启, 结束后关闭以停止记录. 已有记录会保留, 可导出或清空. 诊断内容不包含 PIN 或配对凭据.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Button(copied ? "已复制" : "复制脱敏诊断", systemImage: "doc.on.doc") {
                         UIPasteboard.general.string = state.diagnostics
                         copied = true
+                    }
+                    Button("清空诊断记录", role: .destructive) {
+                        DiagnosticLog.clear()
+                        copied = false
                     }
                 }
             }

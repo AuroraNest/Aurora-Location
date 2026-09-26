@@ -364,7 +364,10 @@ final class AppState: ObservableObject {
             let path = try PairingStore.fileURL().path
             engineAttempted = true
             try await LocationEngine.perform(command, pairingPath: path)
-            DiagnosticLog.event("native.ok relay=\(await transportSnapshot())")
+            if DiagnosticLog.enabled {
+                let snapshot = await transportSnapshot()
+                DiagnosticLog.event("native.ok relay=\(snapshot)")
+            }
             lastErrorCode = "none"
             switch command {
             case .set(let coordinate):
@@ -399,7 +402,10 @@ final class AppState: ObservableObject {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             #endif
         } catch {
-            DiagnosticLog.event("operation.failed relay=\(await transportSnapshot())")
+            if DiagnosticLog.enabled {
+                let snapshot = await transportSnapshot()
+                DiagnosticLog.event("operation.failed relay=\(snapshot)")
+            }
             isSimulating = false
             if let startingWalk { walkingSession = startingWalk }
             walkingSession?.interrupt()
@@ -438,11 +444,17 @@ final class AppState: ObservableObject {
             try await prepareConnection(precheck: precheck)
             engineAttempted = true
             try await LocationEngine.perform(nil, pairingPath: PairingStore.fileURL().path)
-            DiagnosticLog.event("native.ok relay=\(await transportSnapshot())")
+            if DiagnosticLog.enabled {
+                let snapshot = await transportSnapshot()
+                DiagnosticLog.event("native.ok relay=\(snapshot)")
+            }
             developerStatus = "检测成功, 会话已关闭"
             lastErrorCode = "none"
         } catch {
-            DiagnosticLog.event("native.failure relay=\(await transportSnapshot())")
+            if DiagnosticLog.enabled {
+                let snapshot = await transportSnapshot()
+                DiagnosticLog.event("native.failure relay=\(snapshot)")
+            }
             developerStatus = "检测未完成"
             if engineAttempted { developerStatus += " / " + (await LocationEngine.lastFailureDetails()) }
             report(error as? AuroraLocationError ?? .pairingInvalid)
@@ -486,17 +498,29 @@ final class AppState: ObservableObject {
             tunnelStatus = "仅运行真实开发者握手"
             developerStatus = "正在连接"
             DiagnosticLog.event("precheck.skipped diagnostic-only")
-            DiagnosticLog.event("native.begin relay=\(await transportSnapshot())")
+            if DiagnosticLog.enabled {
+                let snapshot = await transportSnapshot()
+                DiagnosticLog.event("native.begin relay=\(snapshot)")
+            }
             return
         }
         tunnelStatus = "正在检测"
-        DiagnosticLog.event("precheck.begin relay=\(await transportSnapshot())")
+        if DiagnosticLog.enabled {
+            let snapshot = await transportSnapshot()
+            DiagnosticLog.event("precheck.begin relay=\(snapshot)")
+        }
         let probe = await NetworkStatus.probeTunnel()
-        DiagnosticLog.event("precheck.end \(probe.details) relay=\(await transportSnapshot())")
+        if DiagnosticLog.enabled {
+            let snapshot = await transportSnapshot()
+            DiagnosticLog.event("precheck.end \(probe.details) relay=\(snapshot)")
+        }
         tunnelStatus = (probe.reachable ? "本机端口可达" : "本机端口不可达") + " / " + probe.details
         guard probe.reachable else { throw AuroraLocationError.tunnelUnavailable }
         developerStatus = "正在连接"
-        DiagnosticLog.event("native.begin relay=\(await transportSnapshot())")
+        if DiagnosticLog.enabled {
+            let snapshot = await transportSnapshot()
+            DiagnosticLog.event("native.begin relay=\(snapshot)")
+        }
     }
 
     private func transportSnapshot() async -> String {
@@ -711,7 +735,10 @@ final class AppState: ObservableObject {
                     try await ShadowrocketTunnel.start()
                     relayStatus = "代理诊断中继已启动"
                     let probe = loopback ? await NetworkStatus.probeLoopback(restrictListener: restricted, peerToPeer: peer) : await NetworkStatus.probeTunnel(viaLocalProxy: true)
-                    DiagnosticLog.event("proxy.end wifiAddress=\(NetworkStatus.hasWiFiAddress) \(probe.details) relay=\(await ShadowrocketTunnel.snapshot())")
+                    if DiagnosticLog.enabled {
+                        let snapshot = await ShadowrocketTunnel.snapshot()
+                        DiagnosticLog.event("proxy.end wifiAddress=\(NetworkStatus.hasWiFiAddress) \(probe.details) relay=\(snapshot)")
+                    }
                     locationMonitor.recordDebugEvent("proxyProbe wifi=\(NetworkStatus.hasWiFiAddress) \(probe.details)")
                 } catch {
                     locationMonitor.recordDebugEvent("proxyProbe relay-start-failed")

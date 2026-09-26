@@ -49,9 +49,13 @@ struct PlacesSnapshot {
     static var running = false
     static var startCount = 0
     static var stopCount = 0
+    static var snapshotCount = 0
     static func start() async throws { startCount += 1; running = true }
     static func stop() async -> String { stopCount += 1; running = false; return "stopped" }
-    static func snapshot() async -> String { running ? "running" : "stopped" }
+    static func snapshot() async -> String {
+        snapshotCount += 1
+        return running ? "running" : "stopped"
+    }
 }
 
 @MainActor enum LocalDeviceTunnel {
@@ -95,6 +99,7 @@ struct PlacesSnapshot {
 }
 
 enum DiagnosticLog {
+    static let enabled = false
     static func begin(_ operation: String) {}
     static func event(_ message: String) {}
     static func report() -> String { "test" }
@@ -258,6 +263,8 @@ enum UIDevice {
         await state.execute(.clear)
         print("PASS: outdoor Wi-Fi guard, local-only startup/reuse/clear/failure, safe mode switch and unchanged default transport")
         try await externalModeCheck()
+        assert(ShadowrocketTunnel.snapshotCount == 0, "Disabled diagnostics must skip relay snapshots")
+        print("PASS: diagnostics off skips relay snapshots across connection and location flows")
     }
 
     @MainActor static func externalModeCheck() async throws {

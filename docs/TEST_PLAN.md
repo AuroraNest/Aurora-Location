@@ -253,7 +253,7 @@ Rust patch 检查和锁定源码构建见 `Vendor/idevice` 的记录. 不能使�
 - 系统设置关闭 Wi-Fi 后, 旧会话换点失败. 新进程纯蜂窝握手约 0.2 秒返回 tunnelUnavailable / 连接提前关闭 / code 1, sub 0. Wi-Fi 无线功能开启但不连接网络的对照也失败. 省略 TCP 预探测仍失败, 已撤回该实验改动. 蜂窝问题未解决.
 - sh scripts/check.sh 通过, 包括 EOF 固定分类与原始 peer 内容不泄露的回归; 签名 Debug build 和安装完成.
 
-Debug 的 locationDebugEvents 仅保留最近 40 条状态事件, 无坐标或配对数据. UserDefaults 后台写盘可能延迟; 回到 App 后再导出偏好 plist 进行检查:
+详细诊断在 Debug/Release 均默认关闭. 验证前在设置中手动开启 "记录详细诊断", 状态事件统一保存在 detailedDiagnosticEvents, 最多 500 条, 无坐标或配对数据. 结束后关闭开关即停止新增记录, 可导出或清空已有记录. UserDefaults 后台写盘可能延迟; 回到 App 后再导出偏好 plist 进行检查:
 
 ```sh
 sh scripts/check-device-maintenance.sh /tmp/aurora-location-preferences.plist

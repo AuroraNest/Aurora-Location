@@ -4,6 +4,14 @@ cd "$(dirname "$0")/.."
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/aurora-location-check.XXXXXX")
 trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+for mode in debug release; do
+  debug_flag=""
+  if [ "$mode" = debug ]; then debug_flag="-DDEBUG"; fi
+  xcrun swiftc $debug_flag -module-cache-path "$test_dir/cache" \
+    AuroraLocation/Core/DiagnosticLog.swift Tests/DiagnosticLogCheck.swift \
+    -o "$test_dir/diagnostics-$mode-check"
+  "$test_dir/diagnostics-$mode-check"
+done
 xcrun swiftc -module-cache-path "$test_dir/cache" \
   AuroraLocation/Models/Location.swift AuroraLocation/Storage/LocalStore.swift \
   AuroraLocation/Storage/TunnelKeys.swift Tests/main.swift \

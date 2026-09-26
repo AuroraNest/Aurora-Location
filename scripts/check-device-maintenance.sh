@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
-# Input is the app preference plist exported after a Debug device run, not pairing data.
-plutil -extract locationDebugEvents json -o - "$1" | python3 -c '
+# Enable detailed diagnostics before the device run, then export the app preference plist.
+plutil -extract detailedDiagnosticEvents json -o - "$1" | python3 -c '
 import json, sys, time
 events = json.load(sys.stdin)
 last_stop = max((i for i, event in enumerate(events) if " maintenanceStopped " in event), default=-1)

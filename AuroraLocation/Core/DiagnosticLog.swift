@@ -4,11 +4,7 @@ import Foundation
 enum DiagnosticLog {
     static let enabledKey = "detailedDiagnosticsEnabled"
     static let eventsKey = "detailedDiagnosticEvents"
-    #if DEBUG
-    static let defaultEnabled = true
-    #else
     static let defaultEnabled = false
-    #endif
     private static let lock = NSLock()
     private static var run = "none"
     private static var started = ProcessInfo.processInfo.systemUptime
@@ -17,20 +13,20 @@ enum DiagnosticLog {
     }
 
     static func begin(_ operation: String) {
-        guard enabled else { return }
         lock.lock()
         defer { lock.unlock() }
+        guard enabled else { return }
         run = UUID().uuidString
         started = ProcessInfo.processInfo.systemUptime
         append("begin operation=\(operation)")
         append("os=\(ProcessInfo.processInfo.operatingSystemVersionString) app=\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown")")
     }
 
-    static func event(_ detail: String) {
-        guard enabled else { return }
+    static func event(_ detail: @autoclosure () -> String) {
         lock.lock()
         defer { lock.unlock() }
-        append(detail)
+        guard enabled else { return }
+        append(detail())
     }
 
     private static func append(_ detail: String) {
@@ -46,5 +42,12 @@ enum DiagnosticLog {
         lock.lock()
         defer { lock.unlock() }
         return (UserDefaults.standard.stringArray(forKey: eventsKey) ?? []).joined(separator: "\n")
+    }
+
+    static func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+        UserDefaults.standard.removeObject(forKey: eventsKey)
+        UserDefaults.standard.removeObject(forKey: "locationDebugEvents")
     }
 }
